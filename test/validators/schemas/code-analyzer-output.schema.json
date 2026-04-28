@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "code-analyzer output",
+  "type": "object",
+  "required": ["language", "modules", "routes", "frontend_files", "stats", "scanned_at", "project_root"],
+  "properties": {
+    "language": { "type": "string", "enum": ["typescript", "javascript", "python", "java", "kotlin", "csharp"] },
+    "additional_languages": { "type": "array", "items": { "type": "string" } },
+    "scanned_at": { "type": "string", "format": "date-time" },
+    "project_root": { "type": "string", "minLength": 1 },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "hash", "type"],
+        "properties": {
+          "path":          { "type": "string", "minLength": 1 },
+          "hash":          { "type": "string", "minLength": 64, "maxLength": 64 },
+          "type":          { "type": "string", "enum": ["service", "controller", "model", "util", "middleware", "frontend"] },
+          "exports":       { "type": "array", "items": { "type": "string" } },
+          "dependencies":  { "type": "array", "items": { "type": "string" } },
+          "has_db_queries":{ "type": "boolean" },
+          "has_http_calls":{ "type": "boolean" },
+          "has_auth":      { "type": "boolean" },
+          "input_fields":  { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["method", "path", "file"],
+        "properties": {
+          "method":        { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] },
+          "path":          { "type": "string" },
+          "handler":       { "type": "string" },
+          "file":          { "type": "string" },
+          "requires_auth": { "type": "boolean" }
+        }
+      }
+    },
+    "frontend_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "hash"],
+        "properties": {
+          "path":            { "type": "string" },
+          "hash":            { "type": "string" },
+          "has_forms":       { "type": "boolean" },
+          "has_navigation":  { "type": "boolean" }
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "required": ["total_files", "has_auth", "has_db", "has_api", "has_frontend"],
+      "properties": {
+        "total_files":  { "type": "integer", "minimum": 0 },
+        "by_type":      { "type": "object" },
+        "has_auth":     { "type": "boolean" },
+        "has_db":       { "type": "boolean" },
+        "has_api":      { "type": "boolean" },
+        "has_frontend": { "type": "boolean" }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "file", "severity"],
+        "properties": {
+          "type":      { "type": "string" },
+          "file":      { "type": "string" },
+          "line_hint": { "type": "string" },
+          "severity":  { "type": "string", "enum": ["high", "medium", "low"] }
+        }
+      }
+    },
+    "skipped_files": { "type": "array", "items": { "type": "string" } }
+  }
+}

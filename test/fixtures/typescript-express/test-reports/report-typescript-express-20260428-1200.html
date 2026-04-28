@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="he" dir="auto">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Coverage — typescript-express</title>
+  <style>
+    :root {
+      --red:    #E53E3E;
+      --orange: #DD6B20;
+      --green:  #38A169;
+      --gray:   #718096;
+      --bg:     #F7FAFC;
+      --surface: #FFFFFF;
+      --border: #E2E8F0;
+      --text-primary:   #2D3748;
+      --text-secondary: #718096;
+      --badge-covered:  #C6F6D5;
+      --badge-partial:  #FEFCBF;
+      --badge-uncovered:#FED7D7;
+      --badge-unchanged:#EDF2F7;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg:      #1A202C;
+        --surface: #2D3748;
+        --border:  #4A5568;
+        --text-primary:   #E2E8F0;
+        --text-secondary: #A0AEC0;
+        --badge-covered:  #22543D;
+        --badge-partial:  #744210;
+        --badge-uncovered:#742A2A;
+        --badge-unchanged:#2D3748;
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text-primary); font-size: 14px; }
+
+    /* Header */
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 1rem 2rem; background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .header-left { display: flex; align-items: center; gap: 0.75rem; }
+    .header-right { display: flex; align-items: center; gap: 1rem; }
+    .header h1 { font-size: 1.25rem; font-weight: 700; color: var(--text-primary); }
+    .run-badge {
+      display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
+      background: #EBF8FF; color: #2B6CB0; font-size: 0.75rem; font-weight: 600;
+    }
+    .btn-outline {
+      padding: 0.4rem 0.9rem; border: 1px solid var(--border); border-radius: 6px;
+      font-size: 0.8rem; color: var(--text-secondary); text-decoration: none;
+    }
+    .btn-outline:hover { background: var(--bg); }
+    time { font-size: 0.8rem; color: var(--text-secondary); }
+
+    /* Scorecard */
+    .scorecard { padding: 2rem; background: var(--bg); }
+    .gauge-grid { display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .gauge-card { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+    .gauge-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+    .gauge-sub { font-size: 0.8rem; color: var(--text-secondary); }
+    .summary-pills { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+    .pill {
+      padding: 0.35rem 0.75rem; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 999px;
+      font-size: 0.8rem; color: var(--text-secondary);
+    }
+
+    /* Timeline */
+    .timeline-section { padding: 1.5rem 2rem; background: var(--surface); border-top: 1px solid var(--border); }
+    .timeline-section h2 { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+    .timeline-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .timeline-table th { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 2px solid var(--border); color: var(--text-secondary); font-weight: 600; }
+    .timeline-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+    .status-icon { font-weight: 700; margin-right: 0.4rem; }
+    .status-icon.done    { color: var(--green); }
+    .status-icon.passed  { color: var(--green); }
+    .status-icon.skipped { color: var(--gray); }
+    .status-icon.failed  { color: var(--red); }
+    .duration { color: var(--text-secondary); font-variant-numeric: tabular-nums; font-family: monospace; }
+
+    /* Modules */
+    .modules-section { padding: 1.5rem 2rem; }
+    .modules-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem; }
+    .modules-header h2 { font-size: 1rem; font-weight: 700; }
+    .filters { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .filter-btn {
+      padding: 0.3rem 0.75rem; border: 1px solid var(--border);
+      border-radius: 6px; font-size: 0.8rem; background: var(--surface);
+      color: var(--text-secondary); cursor: pointer;
+    }
+    .filter-btn.active { background: var(--text-primary); color: #fff; border-color: var(--text-primary); }
+    .search-box {
+      padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: 6px;
+      font-size: 0.8rem; background: var(--surface); color: var(--text-primary);
+    }
+    .module-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .module-table th { text-align: left; padding: 0.5rem; border-bottom: 2px solid var(--border); color: var(--text-secondary); font-weight: 600; }
+    .module-table td { padding: 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .module-path { font-family: monospace; font-size: 0.75rem; }
+    .lang-badge { padding: 0.1rem 0.4rem; background: #EBF8FF; color: #2B6CB0; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+    .status-badge { padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; }
+    .status-badge.covered   { background: var(--badge-covered);   color: #22543D; }
+    .status-badge.partial   { background: var(--badge-partial);   color: #744210; }
+    .status-badge.uncovered { background: var(--badge-uncovered); color: #742A2A; }
+    .status-badge.unchanged { background: var(--badge-unchanged); color: var(--gray); }
+    .test-link { color: #3182CE; text-decoration: none; font-family: monospace; font-size: 0.72rem; display: block; }
+    .test-link:hover { text-decoration: underline; }
+    details > summary { cursor: pointer; color: var(--text-secondary); font-size: 0.8rem; }
+    details ul { margin: 0.3rem 0 0 1rem; padding: 0; }
+    details li { margin-bottom: 0.2rem; font-size: 0.75rem; line-height: 1.5; }
+    .none { color: var(--text-secondary); }
+
+    /* Gaps */
+    .gaps-section { padding: 1.5rem 2rem; background: var(--surface); border-top: 1px solid var(--border); }
+    .gaps-section h2 { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+    .gap-group { margin-bottom: 1.5rem; }
+    .gap-group h3 { font-size: 0.9rem; font-weight: 700; margin-bottom: 0.75rem; }
+    .gap-card { padding: 0.75rem 1rem; border-left: 4px solid; border-radius: 0 6px 6px 0; margin-bottom: 0.5rem; background: var(--bg); }
+    .gap-card.high   { border-color: var(--red); }
+    .gap-card.medium { border-color: var(--orange); }
+    .gap-card.low    { border-color: var(--green); }
+    .gap-module { font-family: monospace; font-size: 0.72rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem; }
+    .gap-card p { margin: 0; font-size: 0.85rem; }
+
+    /* Blind spots */
+    .blindspots-section { padding: 1.5rem 2rem; background: var(--bg); border-top: 1px solid var(--border); }
+    .blindspots-section h2 { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+    .section-sub { font-size: 0.8rem; font-weight: 400; color: var(--text-secondary); margin-left: 0.5rem; }
+    .blindspot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .blindspot-card { padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+    .blindspot-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .blindspot-category { padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
+    .blindspot-category.unit     { background: #EBF8FF; color: #2B6CB0; }
+    .blindspot-category.ui       { background: #FAF5FF; color: #553C9A; }
+    .blindspot-category.api      { background: #FFFAF0; color: #7B341E; }
+    .blindspot-category.security { background: #FFF5F5; color: #742A2A; }
+    .blindspot-module { font-family: monospace; font-size: 0.7rem; color: var(--text-secondary); }
+    .blindspot-desc { font-size: 0.82rem; line-height: 1.5; margin: 0; }
+
+    /* Recommendations */
+    .recommendations-section { padding: 1.5rem 2rem; background: var(--surface); border-top: 1px solid var(--border); }
+    .recommendations-section h2 { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+    .recommendations-list { padding-left: 1.5rem; }
+    .recommendations-list li { margin-bottom: 0.75rem; font-size: 0.85rem; line-height: 1.5; }
+    .rec-module { font-family: monospace; font-size: 0.72rem; color: var(--text-secondary); display: block; }
+
+    /* Warnings */
+    .warnings-section { padding: 1rem 2rem; background: #FFFAF0; border-top: 2px solid var(--orange); }
+    .warnings-section h3 { font-size: 0.9rem; font-weight: 700; color: #7B341E; margin-bottom: 0.5rem; }
+    .warning-item { font-size: 0.82rem; padding: 0.5rem 0; border-bottom: 1px solid #FEEBC8; }
+    .warning-file { font-family: monospace; font-size: 0.72rem; color: #7B341E; }
+
+    /* Footer */
+    .footer { padding: 1.5rem 2rem; border-top: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
+    .footer-links { display: flex; gap: 1rem; }
+    .footer-links a { font-size: 0.8rem; color: #3182CE; text-decoration: none; }
+    .footer-hint { font-size: 0.8rem; color: var(--text-secondary); }
+    .footer-meta { font-size: 0.75rem; color: var(--text-secondary); }
+  </style>
+</head>
+<body>
+
+<!-- 1. Header -->
+<header class="header">
+  <div class="header-left">
+    <h1>typescript-express</h1>
+    <span class="run-badge">Full scan</span>
+  </div>
+  <div class="header-right">
+    <time datetime="2026-04-28T12:00:00Z">28 Apr 2026, 12:00 UTC</time>
+    <a class="btn-outline" href="file:///Users/bechorsimhaev/Desktop/code/qa-skills/test/fixtures/typescript-express/tests">Open tests folder</a>
+  </div>
+</header>
+
+<!-- 2. Scorecard -->
+<section class="scorecard">
+  <div class="gauge-grid">
+
+    <!-- Unit -->
+    <div class="gauge-card">
+      <p class="gauge-label">Unit</p>
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/>
+        <circle cx="60" cy="60" r="50" fill="none"
+          stroke="#DD6B20"
+          stroke-width="12"
+          stroke-dasharray="235.5 314"
+          stroke-dashoffset="78.5"
+          stroke-linecap="round"
+          transform="rotate(-90 60 60)"/>
+        <text x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text-primary)">75%</text>
+        <text x="60" y="74" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Unit</text>
+      </svg>
+      <p class="gauge-sub">3/4 files</p>
+    </div>
+
+    <!-- UI -->
+    <div class="gauge-card">
+      <p class="gauge-label">UI</p>
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/>
+        <circle cx="60" cy="60" r="50" fill="none"
+          stroke="#E53E3E"
+          stroke-width="12"
+          stroke-dasharray="0 314"
+          stroke-dashoffset="78.5"
+          stroke-linecap="round"
+          transform="rotate(-90 60 60)"/>
+        <text x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text-primary)">0%</text>
+        <text x="60" y="74" text-anchor="middle" font-size="11" fill="var(--text-secondary)">UI</text>
+      </svg>
+      <p class="gauge-sub">0/1 files</p>
+    </div>
+
+    <!-- API -->
+    <div class="gauge-card">
+      <p class="gauge-label">API</p>
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/>
+        <circle cx="60" cy="60" r="50" fill="none"
+          stroke="#DD6B20"
+          stroke-width="12"
+          stroke-dasharray="210.4 314"
+          stroke-dashoffset="78.5"
+          stroke-linecap="round"
+          transform="rotate(-90 60 60)"/>
+        <text x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text-primary)">67%</text>
+        <text x="60" y="74" text-anchor="middle" font-size="11" fill="var(--text-secondary)">API</text>
+      </svg>
+      <p class="gauge-sub">2/3 files</p>
+    </div>
+
+    <!-- Security -->
+    <div class="gauge-card">
+      <p class="gauge-label">Security</p>
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/>
+        <circle cx="60" cy="60" r="50" fill="none"
+          stroke="#38A169"
+          stroke-width="12"
+          stroke-dasharray="251.2 314"
+          stroke-dashoffset="78.5"
+          stroke-linecap="round"
+          transform="rotate(-90 60 60)"/>
+        <text x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text-primary)">80%</text>
+        <text x="60" y="74" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Security</text>
+      </svg>
+      <p class="gauge-sub">4/5 files</p>
+    </div>
+
+  </div>
+
+  <div class="summary-pills">
+    <span class="pill">📁 8 files scanned</span>
+    <span class="pill">✅ 108 tests generated</span>
+    <span class="pill">🔄 0 updated</span>
+    <span class="pill">⏸ 0 unchanged</span>
+  </div>
+</section>
+
+<!-- 3. Timeline -->
+<section class="timeline-section">
+  <h2>What was done</h2>
+  <table class="timeline-table">
+    <thead>
+      <tr><th>Step</th><th>Result</th><th>Duration</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>code-analyzer</td><td><span class="status-icon done">✓</span> Done</td><td class="duration">210ms</td></tr>
+      <tr><td>unit-test</td><td><span class="status-icon done">✓</span> Done</td><td class="duration">1480ms</td></tr>
+      <tr><td>api-test</td><td><span class="status-icon done">✓</span> Done</td><td class="duration">990ms</td></tr>
+      <tr><td>security-test</td><td><span class="status-icon done">✓</span> Done</td><td class="duration">820ms</td></tr>
+      <tr><td>ui-playwright</td><td><span class="status-icon skipped">⟳</span> Skipped (no frontend test runner)</td><td class="duration">—</td></tr>
+      <tr><td>coverage-reporter</td><td><span class="status-icon done">✓</span> Done</td><td class="duration">95ms</td></tr>
+      <tr><td>execute-unit</td><td><span class="status-icon passed">✓</span> Passed (2 iterations)</td><td class="duration">420ms</td></tr>
+      <tr><td>execute-api</td><td><span class="status-icon passed">✓</span> Passed (1 iteration)</td><td class="duration">390ms</td></tr>
+      <tr><td>execute-security</td><td><span class="status-icon passed">✓</span> Passed (1 iteration)</td><td class="duration">210ms</td></tr>
+      <tr><td>execute-ui</td><td><span class="status-icon skipped">⟳</span> Skipped</td><td class="duration">—</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 4. Module table -->
+<section class="modules-section">
+  <div class="modules-header">
+    <h2>Modules</h2>
+    <div class="filters">
+      <button class="filter-btn active" onclick="filterModules('all', this)">All</button>
+      <button class="filter-btn" onclick="filterModules('uncovered', this)">Uncovered</button>
+      <button class="filter-btn" onclick="filterModules('partial', this)">Partial</button>
+      <button class="filter-btn" onclick="filterModules('blind-spots', this)">Has Blind Spots</button>
+      <input class="search-box" type="search" placeholder="Search modules..." oninput="searchModules(this.value)">
+    </div>
+  </div>
+
+  <table class="module-table" id="module-table">
+    <thead>
+      <tr>
+        <th>Module</th><th>Language</th><th>Status</th><th>Tests</th><th>Gaps</th><th>Blind Spots</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr data-status="uncovered" data-has-blindspots="true">
+        <td class="module-path">src/app.ts</td>
+        <td><span class="lang-badge">TS</span></td>
+        <td><span class="status-badge uncovered">uncovered</span></td>
+        <td><span class="none">—</span></td>
+        <td><details><summary>1 gap(s)</summary><ul><li>HTTP handler untested — request parsing, response format, and error codes not verified</li></ul></details></td>
+        <td><details><summary>1 spot(s)</summary><ul><li>No CORS header test — cross-origin access policy unverified</li></ul></details></td>
+      </tr>
+      <tr data-status="covered" data-has-blindspots="true">
+        <td class="module-path">src/routes/auth.ts</td>
+        <td><span class="lang-badge">TS</span></td>
+        <td><span class="status-badge covered">covered</span></td>
+        <td><a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/qa-skills/test/fixtures/typescript-express/tests/api/auth.api.test.ts">auth.api.test.ts</a></td>
+        <td><span class="none">—</span></td>
+        <td><details><summary>1 spot(s)</summary><ul><li>No CORS header test — cross-origin access policy unverified</li></ul></details></td>
+      </tr>
+      <tr data-status="covered" data-has-blindspots="true">
+        <td class="module-path">src/routes/users.ts</td>
+        <td><span class="lang-badge">TS</span></td>
+        <td><span class="status-badge covered">covered</span></td>
+        <td><a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/qa-skills/test/fixtures/typescript-express/tests/api/users.api.test.ts">users.api.test.ts</a></td>
+        <td><span class="none">—</span></td>
+        <td><details><summary>1 spot(s)</summary><ul><li>No CORS header test — cross-origin access policy unverified</li></ul></details></td>
+      </tr>
+      <tr data-status="covered" data-has-blindspots="true">
+        <td class="module-path">src/services/userService.ts</td>
+        <td><span class="lang-badge">TS</span></td>
+        <td><span class="status-badge covered">covered</span></td>
+        <td>
+          <a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/qa-skills/test/fixtures/typescript-express/tests/unit/services/userService.test.ts">userService.test.ts</a>
+          <a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/qa-skills/test/fixtures/typescript-express/tests/security/auth.security.test.ts">auth.security.test.ts</a>
+        </td>
+        <td><span class="none">—</span></td>
+        <td><details><summary>2 spot(s)</summary><ul><li>No timing attack test — response time may leak whether user exists</li><li>No concurrent execution test — race condition under parallel calls undetected</li></ul></details></td>
+      </tr>
+      <tr data-status="covered" data-has-blindspots="false">
+        <td class="module-path">src/middleware/auth.ts</td>
+        <td><span class="lang-badge">TS</span></td>
+        <td><span class="status-badge covered">covered</span></td>
+        <td><a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/qa-skills/test/fixtures/typescript-express/tests/unit/middleware/auth.test.ts">auth.test.ts</a></td>
+        <td><span class="none">—</span></td>
+        <td><span class="none">—</span></td>
+      </tr>
+      <tr data-status="covered" data-has-blindspots="false">
+        <td class="module-path">src/models/User.ts</td>
+        <td><span class="lang-badge">TS</span></td>
+        <td><span class="status-badge covered">covered</span></td>
+        <td><span class="none">— (interface only)</span></td>
+        <td><span class="none">—</span></td>
+        <td><span class="none">—</span></td>
+      </tr>
+      <tr data-status="uncovered" data-has-blindspots="false">
+        <td class="module-path">src/models/db.ts</td>
+        <td><span class="lang-badge">TS</span></td>
+        <td><span class="status-badge uncovered">uncovered</span></td>
+        <td><span class="none">—</span></td>
+        <td><details><summary>1 gap(s)</summary><ul><li>Module exports 1 symbol with no test coverage</li></ul></details></td>
+        <td><span class="none">—</span></td>
+      </tr>
+      <tr data-status="uncovered" data-has-blindspots="true">
+        <td class="module-path">src/components/LoginForm.tsx</td>
+        <td><span class="lang-badge">TS</span></td>
+        <td><span class="status-badge uncovered">uncovered</span></td>
+        <td><span class="none">—</span></td>
+        <td><details><summary>1 gap(s)</summary><ul><li>No UI tests — form submission, validation feedback, and loading states unverified</li></ul></details></td>
+        <td><details><summary>1 spot(s)</summary><ul><li>No loading state test — UI may show broken state while fetching data</li></ul></details></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 5. Gaps -->
+<section class="gaps-section">
+  <h2>Coverage Gaps</h2>
+
+  <div class="gap-group">
+    <h3>🔴 High Priority</h3>
+    <div class="gap-card high">
+      <span class="gap-module">src/app.ts</span>
+      <p>HTTP handler untested — request parsing, response format, and error codes not verified</p>
+    </div>
+  </div>
+
+  <div class="gap-group">
+    <h3>🟡 Medium Priority</h3>
+    <div class="gap-card medium">
+      <span class="gap-module">src/components/LoginForm.tsx</span>
+      <p>No UI tests — form submission, validation feedback, and loading states unverified</p>
+    </div>
+  </div>
+
+  <div class="gap-group">
+    <h3>🟢 Low Priority</h3>
+    <div class="gap-card low">
+      <span class="gap-module">src/models/db.ts</span>
+      <p>Module exports 1 symbol with no test coverage (Pool instance — connection config only)</p>
+    </div>
+  </div>
+</section>
+
+<!-- 5b. Warnings -->
+<section class="warnings-section">
+  <h3>⚠️ Static Analysis Warnings</h3>
+  <div class="warning-item">
+    <span class="warning-file">src/routes/auth.ts</span><br>
+    POST /auth/login accesses DB without auth check — expected for login endpoint, but verify error responses don't leak sensitive data.
+  </div>
+</section>
+
+<!-- 6. Blind Spots -->
+<section class="blindspots-section">
+  <h2>Blind Spots <span class="section-sub">What humans typically miss</span></h2>
+  <div class="blindspot-grid">
+    <div class="blindspot-card">
+      <div class="blindspot-header">
+        <span class="blindspot-category security">SECURITY</span>
+        <span class="blindspot-module">src/services/userService.ts</span>
+      </div>
+      <p class="blindspot-desc">No timing attack test — response time may leak whether user exists (bcrypt compare takes longer for existing users)</p>
+    </div>
+    <div class="blindspot-card">
+      <div class="blindspot-header">
+        <span class="blindspot-category unit">UNIT</span>
+        <span class="blindspot-module">src/services/userService.ts</span>
+      </div>
+      <p class="blindspot-desc">No concurrent execution test — race condition under parallel createUser() calls may double-insert the same email</p>
+    </div>
+    <div class="blindspot-card">
+      <div class="blindspot-header">
+        <span class="blindspot-category security">SECURITY</span>
+        <span class="blindspot-module">src/routes/auth.ts</span>
+      </div>
+      <p class="blindspot-desc">No CORS header test — cross-origin access policy unverified; malicious sites may be able to call these endpoints</p>
+    </div>
+    <div class="blindspot-card">
+      <div class="blindspot-header">
+        <span class="blindspot-category security">SECURITY</span>
+        <span class="blindspot-module">src/routes/users.ts</span>
+      </div>
+      <p class="blindspot-desc">No CORS header test — cross-origin access policy unverified for user management endpoints</p>
+    </div>
+    <div class="blindspot-card">
+      <div class="blindspot-header">
+        <span class="blindspot-category ui">UI</span>
+        <span class="blindspot-module">src/components/LoginForm.tsx</span>
+      </div>
+      <p class="blindspot-desc">No loading state test — form may show broken state while fetch is in-flight; button disabled state unverified</p>
+    </div>
+  </div>
+</section>
+
+<!-- 7. Recommendations -->
+<section class="recommendations-section">
+  <h2>Recommendations</h2>
+  <ol class="recommendations-list">
+    <li>
+      <span class="rec-module">src/app.ts</span>
+      Add integration tests for app entry point: verify middleware order, route mounting, and JSON error responses.
+    </li>
+    <li>
+      <span class="rec-module">src/services/userService.ts</span>
+      [SECURITY] Add timing attack test — measure response time for existing vs non-existent email over 10+ iterations; assert &lt;100ms difference.
+    </li>
+    <li>
+      <span class="rec-module">src/services/userService.ts</span>
+      [UNIT] Add concurrent createUser() test — call twice simultaneously with same email, verify only one record is created.
+    </li>
+    <li>
+      <span class="rec-module">src/routes/auth.ts</span>
+      [SECURITY] Add CORS header tests — verify evil.com origin is rejected; verify allowed origin gets correct Access-Control-Allow-Origin.
+    </li>
+    <li>
+      <span class="rec-module">src/components/LoginForm.tsx</span>
+      [UI] Add Playwright tests for LoginForm — submit flow, loading state, error display, and accessibility (aria-required, role=alert).
+    </li>
+  </ol>
+</section>
+
+<!-- 8. Footer -->
+<footer class="footer">
+  <div class="footer-links">
+    <a href="file:///Users/bechorsimhaev/Desktop/code/qa-skills/test/fixtures/typescript-express/test-state.json">test-state.json</a>
+    <a href="file:///Users/bechorsimhaev/Desktop/code/qa-skills/test/fixtures/typescript-express/test-reports/report-data.json">report-data.json</a>
+  </div>
+  <p class="footer-hint">Run again when: you add new files or change existing logic.</p>
+  <p class="footer-meta">Generated by qa-skills test-orchestrator • 2026-04-28T12:00:00Z</p>
+</footer>
+
+<script>
+  function filterModules(filter, btn) {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    document.querySelectorAll('#module-table tbody tr').forEach(row => {
+      if (filter === 'all') {
+        row.style.display = '';
+      } else if (filter === 'blind-spots') {
+        row.style.display = row.dataset.hasBlindspots === 'true' ? '' : 'none';
+      } else {
+        row.style.display = row.dataset.status === filter ? '' : 'none';
+      }
+    });
+  }
+
+  function searchModules(query) {
+    const q = query.toLowerCase();
+    document.querySelectorAll('#module-table tbody tr').forEach(row => {
+      const path = row.querySelector('.module-path')?.textContent?.toLowerCase() || '';
+      row.style.display = path.includes(q) ? '' : 'none';
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('details').forEach(d => d.removeAttribute('open'));
+  });
+</script>
+</body>
+</html>

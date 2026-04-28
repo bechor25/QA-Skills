@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "report-data.json",
+  "type": "object",
+  "required": ["project_name", "generated_at", "run_type", "summary", "coverage_by_category", "modules", "gaps", "blind_spots", "recommendations", "timeline"],
+  "properties": {
+    "project_name": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "run_type":     { "type": "string", "enum": ["full", "incremental"] },
+    "summary": {
+      "type": "object",
+      "required": ["files_scanned", "files_with_tests", "new_tests_generated", "tests_updated", "tests_unchanged"],
+      "properties": {
+        "files_scanned":        { "type": "integer", "minimum": 0 },
+        "files_with_tests":     { "type": "integer", "minimum": 0 },
+        "new_tests_generated":  { "type": "integer", "minimum": 0 },
+        "tests_updated":        { "type": "integer", "minimum": 0 },
+        "tests_unchanged":      { "type": "integer", "minimum": 0 }
+      }
+    },
+    "coverage_by_category": {
+      "type": "object",
+      "required": ["unit", "ui", "api", "security"],
+      "additionalProperties": false,
+      "properties": {
+        "unit":     { "$ref": "#/definitions/categoryMetric" },
+        "ui":       { "$ref": "#/definitions/categoryMetric" },
+        "api":      { "$ref": "#/definitions/categoryMetric" },
+        "security": { "$ref": "#/definitions/categoryMetric" }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "language", "status"],
+        "properties": {
+          "path":            { "type": "string" },
+          "language":        { "type": "string" },
+          "status":          { "type": "string", "enum": ["covered", "partial", "uncovered", "unchanged", "error"] },
+          "tests_generated": { "type": "array", "items": { "type": "string" } },
+          "gaps":            { "type": "array", "items": { "type": "string" } },
+          "blind_spots":     { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["module", "reason", "severity"],
+        "properties": {
+          "module":   { "type": "string" },
+          "reason":   { "type": "string", "minLength": 10 },
+          "severity": { "type": "string", "enum": ["high", "medium", "low"] }
+        }
+      }
+    },
+    "blind_spots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["description", "module", "category"],
+        "properties": {
+          "description": { "type": "string", "minLength": 10 },
+          "module":      { "type": "string" },
+          "category":    { "type": "string", "enum": ["unit", "ui", "api", "security"] }
+        }
+      }
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["priority", "text", "module"],
+        "properties": {
+          "priority": { "type": "integer", "minimum": 1 },
+          "text":     { "type": "string", "minLength": 5 },
+          "module":   { "type": "string" }
+        }
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["step", "duration_ms", "status"],
+        "properties": {
+          "step":        { "type": "string" },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "status":      { "type": "string", "enum": ["done", "skipped", "failed"] }
+        }
+      }
+    },
+    "warnings": { "type": "array" }
+  },
+  "definitions": {
+    "categoryMetric": {
+      "type": "object",
+      "required": ["files", "covered", "pct"],
+      "properties": {
+        "files":   { "type": "integer", "minimum": 0 },
+        "covered": { "type": "integer", "minimum": 0 },
+        "pct":     { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    }
+  }
+}

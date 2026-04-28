@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "test-state.json",
+  "type": "object",
+  "required": ["version", "last_scan", "modules"],
+  "properties": {
+    "version":   { "type": "string", "const": "1.0" },
+    "last_scan": { "type": "string", "format": "date-time" },
+    "run_type":  { "type": "string", "enum": ["full", "incremental"] },
+    "modules": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["hash", "last_updated"],
+        "properties": {
+          "hash":            { "type": "string", "minLength": 64, "maxLength": 64 },
+          "tests_generated": { "type": "array", "items": { "type": "string" } },
+          "last_updated":    { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}
