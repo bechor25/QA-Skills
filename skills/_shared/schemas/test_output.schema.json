@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TestOutput",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["source_module", "path", "tests_written", "status"],
+    "properties": {
+      "source_module": { "type": "string" },
+      "path": { "type": "string" },
+      "tests_written": { "type": "integer", "minimum": 0 },
+      "status": { "type": "string", "enum": ["created", "updated", "partial", "skipped", "error"] },
+      "execution_result": { "type": "string", "enum": ["passed", "failed", "partial", "not_run", "skipped_no_server"] },
+      "assertions_covered": { "type": "array", "items": { "type": "string" }, "default": [] },
+      "error_message": { "type": ["string", "null"], "default": null }
+    }
+  }
+}

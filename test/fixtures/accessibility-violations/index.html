@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Accessibility Test Fixture</title>
+</head>
+<body>
+  <h1>Login</h1>
+  <!-- INTENTIONAL a11y violations for testing -->
+  <!-- Violation 1: button without accessible name -->
+  <button onclick="alert('clicked')"></button>
+
+  <!-- Violation 2: image without alt text -->
+  <img src="logo.png">
+
+  <!-- Violation 3: input without label -->
+  <input type="text" placeholder="Enter email">
+  <input type="password" placeholder="Enter password">
+
+  <!-- Violation 4: skipped heading level (h1 then h4) -->
+  <h4>Details</h4>
+
+  <button type="submit">Login</button>
+</body>
+</html>

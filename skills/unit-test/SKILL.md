@@ -18,6 +18,10 @@ description: >
 
 Generates exhaustive unit tests for every exported function and class in each module.
 
+> **User-facing messages**: use `get_message(key, locale, **kwargs)` from
+> `skills/_shared/validate.py`. Message keys defined in `skills/_shared/messages/{he,en}.json`.
+> Never hardcode user-facing strings — use message keys so Hebrew/English stays consistent.
+
 ## Inputs
 
 Receives from `test-orchestrator`:
@@ -93,6 +97,41 @@ The normal, expected usage with valid inputs. Assert return value and/or side ef
 - `undefined` vs `null` — test both explicitly
 - `false` vs `0` vs `""` — falsy value disambiguation
 - `NaN` input where number expected
+
+## Additional "what testers miss" — Phase 8 additions
+
+**Time-zone bugs** — every function touching dates/times must be tested with 3 timezones:
+```typescript
+it.each([
+  ['UTC', 0],
+  ['IST', 5.5 * 60],    // +05:30
+  ['Pacific', -8 * 60]  // -08:00
+])('handles %s timezone offset %i min', (tz, offsetMin) => {
+  const mockDate = new Date(Date.UTC(2024, 0, 15, 12 - offsetMin / 60, 0, 0));
+  jest.setSystemTime(mockDate);
+  const result = formatDate(new Date());
+  expect(result).not.toContain('Invalid');
+  expect(result).toBeDefined();
+});
+```
+
+**Floating point precision** — for any function doing math with money or percentages:
+```typescript
+it('avoids floating point precision errors', () => {
+  // The classic 0.1 + 0.2 trap
+  expect(addAmounts(0.1, 0.2)).toBeCloseTo(0.3, 10);
+  expect(addAmounts(1.005, 0)).toBeCloseTo(1.005, 2);
+});
+```
+
+**Promise rejection propagation**:
+```typescript
+it('propagates rejection without swallowing error', async () => {
+  mockDep.call.mockRejectedValue(new Error('network failure'));
+  await expect(functionUnderTest()).rejects.toThrow('network failure');
+  // Verify the error was NOT silently caught and ignored
+});
+```
 
 ## What humans miss — mandatory inclusions
 

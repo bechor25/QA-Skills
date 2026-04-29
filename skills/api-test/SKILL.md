@@ -19,6 +19,9 @@ description: >
 
 Generates comprehensive HTTP-level tests for every route found by `code-analyzer`.
 
+> **User-facing messages**: use `get_message(key, locale, **kwargs)` from
+> `skills/_shared/validate.py`. Never hardcode strings the tester sees.
+
 ## Inputs
 
 Receives from `test-orchestrator`:
@@ -157,6 +160,52 @@ assert r.status_code in (200, 400)
 
 r = client.get("/users?page=-1", headers=auth)
 assert r.status_code in (200, 400)
+```
+
+## Additional "what testers miss" — Phase 8 additions
+
+**Authorization matrix** — generate a test for every detected role × every route:
+```python
+ROLES = ["user", "admin"]   # inferred from analysis.modules with has_auth
+
+@pytest.mark.parametrize("role,route,method,expected_status", [
+    ("user",  "GET /users",         "get",    200),
+    ("user",  "DELETE /users/1",    "delete", 403),
+    ("admin", "DELETE /users/1",    "delete", 200),
+    # ... generated from route × role matrix
+])
+def test_role_access_matrix(client, role, route, method, expected_status):
+    token = get_token_for_role(client, role)
+    r = getattr(client, method)(route, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == expected_status, \
+        f"Role '{role}' on {method.upper()} {route}: expected {expected_status}, got {r.status_code}"
+```
+
+**Trailing slash normalization**:
+```python
+def test_trailing_slash_redirects_or_matches(client, auth_headers):
+    r1 = client.get("/users", headers=auth_headers)
+    r2 = client.get("/users/", headers=auth_headers)
+    # Both must return 200 or one must redirect (301/308) to the other
+    assert r1.status_code in (200, 301, 308)
+    assert r2.status_code in (200, 301, 308)
+```
+
+**Concurrent same-resource writes** (for PUT/PATCH endpoints):
+```python
+import concurrent.futures
+
+def test_concurrent_updates_no_500(client, auth_headers):
+    def update():
+        return client.put("/users/1", json={"name": "Alice"}, headers=auth_headers)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+        futures = [ex.submit(update) for _ in range(5)]
+        results = [f.result() for f in futures]
+
+    statuses = [r.status_code for r in results]
+    assert 500 not in statuses, f"Concurrent writes caused 500: {statuses}"
+    assert all(s in (200, 204, 409, 429) for s in statuses)
 ```
 
 ## What humans miss — mandatory inclusions

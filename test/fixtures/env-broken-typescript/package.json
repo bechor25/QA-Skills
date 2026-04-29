@@ -1,0 +1,11 @@
+{
+  "name": "env-broken-no-jest",
+  "version": "1.0.0",
+  "description": "Fixture: package.json without jest — env-validator must detect and warn",
+  "scripts": {
+    "start": "node src/app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

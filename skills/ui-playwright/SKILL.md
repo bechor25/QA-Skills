@@ -21,6 +21,9 @@ description: >
 
 Generates Playwright E2E tests for frontend files and user flows found by `code-analyzer`.
 
+> **User-facing messages**: use `get_message(key, locale, **kwargs)` from
+> `skills/_shared/validate.py`. Never hardcode strings the tester sees.
+
 ## Inputs
 
 Receives from `test-orchestrator`:
@@ -221,6 +224,81 @@ test('keyboard navigation works', async ({ page }) => {
   const focused2 = page.locator(':focus');
   // Each tab moves focus
   await expect(focused2).toBeFocused();
+});
+```
+
+## Additional "what testers miss" — Phase 8 additions
+
+**Browser back/forward and refresh — form state**:
+```typescript
+test('browser back does not re-submit form', async ({ page }) => {
+  await page.goto('/register');
+  await page.getByLabel(/email/i).fill('test@example.com');
+  await page.getByLabel(/password/i).fill('TestPass1!');
+  await page.getByRole('button', { name: /submit|register/i }).click();
+  await page.waitForLoadState('networkidle');
+  await page.goBack();
+  // Form should be empty or show a re-fill state — not auto-submit again
+  await expect(page).toHaveURL(/register/);
+  const emailValue = await page.getByLabel(/email/i).inputValue().catch(() => '');
+  // Should not have pre-filled from previous submission
+  expect(emailValue).toBe('');
+});
+
+test('page refresh preserves filter/search state via URL', async ({ page }) => {
+  await page.goto('/users?search=alice');
+  await page.waitForLoadState('networkidle');
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page).toHaveURL(/search=alice/);
+});
+```
+
+**Multi-tab session invalidation**:
+```typescript
+test('logout in one tab invalidates other tabs', async ({ browser }) => {
+  const context = await browser.newContext();
+  const page1 = await context.newPage();
+  const page2 = await context.newPage();
+
+  // Login on page1
+  await page1.goto('/login');
+  await page1.getByLabel(/email/i).fill('user@test.com');
+  await page1.getByLabel(/password/i).fill('TestPass1!');
+  await page1.getByRole('button', { name: /sign in|log in/i }).click();
+  await page1.waitForURL(/dashboard/);
+
+  // Logout on page1
+  await page1.getByRole('button', { name: /logout|sign out/i }).click();
+  await page1.waitForURL(/login/);
+
+  // page2 should detect session invalidated on next navigation
+  await page2.goto('/dashboard');
+  await page2.waitForLoadState('networkidle');
+  await expect(page2).toHaveURL(/login/);
+
+  await context.close();
+});
+```
+
+**RTL rendering for Hebrew routes** (critical for this audience):
+```typescript
+test('Hebrew locale renders RTL correctly', async ({ page }) => {
+  // Check if app has Hebrew routes or i18n
+  await page.goto('/');
+  const htmlDir = await page.getAttribute('html', 'dir');
+  const langAttr = await page.getAttribute('html', 'lang');
+
+  if (langAttr?.startsWith('he') || htmlDir === 'rtl') {
+    // RTL elements should have text-align: right in computed style
+    const bodyDirection = await page.evaluate(() =>
+      window.getComputedStyle(document.body).direction
+    );
+    expect(bodyDirection).toBe('rtl');
+
+    // Take screenshot for visual validation
+    await page.screenshot({ path: 'tests/e2e/screenshots/rtl-layout.png', fullPage: true });
+  }
 });
 ```
 

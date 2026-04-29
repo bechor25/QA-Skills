@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReportData",
+  "type": "object",
+  "required": ["project_name", "generated_at", "run_type", "summary", "coverage_by_category", "modules"],
+  "properties": {
+    "project_name": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "run_type": { "type": "string", "enum": ["full", "incremental"] },
+    "quality_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "files_scanned": { "type": "integer" },
+        "files_with_tests": { "type": "integer" },
+        "new_tests_generated": { "type": "integer" },
+        "tests_updated": { "type": "integer" },
+        "tests_unchanged": { "type": "integer" }
+      }
+    },
+    "coverage_by_category": { "type": "object" },
+    "modules": { "type": "array" },
+    "gaps": { "type": "array", "default": [] },
+    "blind_spots": { "type": "array", "default": [] },
+    "recommendations": { "type": "array", "default": [] },
+    "flaky_tests": { "type": "array", "default": [] },
+    "timeline": { "type": "array", "default": [] },
+    "warnings": { "type": "array", "default": [] },
+    "run_log": { "type": "array", "default": [] }
+  }
+}

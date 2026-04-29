@@ -21,6 +21,9 @@ description: >
 Generates security-focused tests targeting vulnerabilities found via static analysis of actual code.
 No external tools required — pure HTTP client + assertions.
 
+> **User-facing messages**: use `get_message(key, locale, **kwargs)` from
+> `skills/_shared/validate.py`. Never hardcode strings the tester sees.
+
 ## Inputs
 
 Receives from `test-orchestrator`:
@@ -318,6 +321,62 @@ def test_no_timing_difference_for_valid_vs_invalid_user(client):
     assert diff < 0.1, \
         f"Timing leak: existing user avg {avg_existing*1000:.1f}ms vs " \
         f"nonexistent {avg_nonexistent*1000:.1f}ms (diff: {diff*1000:.1f}ms)"
+```
+
+## Additional "what testers miss" — Phase 8 additions
+
+**JWT key confusion (RS256 → HS256 attack)**:
+```python
+import base64, json, hmac, hashlib
+
+def test_jwt_rs256_hs256_confusion(client):
+    """Critical: if server uses RS256, it must reject tokens signed with HS256 using the public key as secret."""
+    # Craft a minimal HS256 token (attacker signs with server's public key as HMAC secret)
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).decode().rstrip("=")
+    payload = base64.urlsafe_b64encode(json.dumps({"sub": "1", "role": "admin", "exp": 9999999999}).encode()).decode().rstrip("=")
+    # Use "secret" as HMAC key (attacker doesn't know real secret — just testing alg confusion)
+    sig_input = f"{header}.{payload}".encode()
+    sig = base64.urlsafe_b64encode(hmac.new(b"secret", sig_input, hashlib.sha256).digest()).decode().rstrip("=")
+    confused_token = f"{header}.{payload}.{sig}"
+
+    r = client.get("/users/me", headers={"Authorization": f"Bearer {confused_token}"})
+    assert r.status_code == 401, "JWT algorithm confusion: server accepted wrong-alg token!"
+```
+
+**Open redirect in callback/next params**:
+```python
+OPEN_REDIRECT_PAYLOADS = [
+    "//evil.com", "https://evil.com", "//evil.com/%2f..", "///evil.com",
+    "https:evil.com", "javascript:alert(1)"
+]
+
+@pytest.mark.parametrize("payload", OPEN_REDIRECT_PAYLOADS)
+def test_no_open_redirect(client, payload):
+    """?next= and ?return_to= must not redirect to external domains."""
+    for param in ["next", "return_to", "redirect", "redirect_uri", "continue"]:
+        r = client.get(f"/login?{param}={payload}", allow_redirects=False)
+        if r.status_code in (301, 302, 303, 307, 308):
+            location = r.headers.get("Location", "")
+            assert not location.startswith("//"), f"Open redirect via {param}: {location}"
+            assert "evil.com" not in location, f"Open redirect via {param}: {location}"
+```
+
+**SSRF — Server-Side Request Forgery** (when URL-accepting field detected):
+```python
+SSRF_PAYLOADS = [
+    "http://localhost:22", "http://127.0.0.1/admin",
+    "http://169.254.169.254/latest/meta-data/",  # AWS metadata
+    "http://10.0.0.1/admin", "file:///etc/passwd",
+]
+
+@pytest.mark.parametrize("payload", SSRF_PAYLOADS)
+def test_ssrf_url_param_rejected(client, auth_headers, payload):
+    """URL parameters must not allow fetching internal addresses."""
+    for url_param in ["url", "webhook", "callback", "image_url", "avatar"]:
+        r = client.post("/settings", json={url_param: payload}, headers=auth_headers)
+        # Must reject or ignore internal URLs
+        assert r.status_code in (400, 422), \
+            f"SSRF possible: {url_param}={payload} returned {r.status_code}"
 ```
 
 ## What humans miss — mandatory inclusions

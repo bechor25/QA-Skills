@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Checkpoint",
+  "type": "object",
+  "required": ["run_id", "phase", "started_at"],
+  "properties": {
+    "run_id": { "type": "string" },
+    "phase": { "type": "integer", "minimum": 0 },
+    "phase_name": { "type": "string" },
+    "completed_skills": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "started_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "completed": { "type": "boolean", "default": false }
+  }
+}

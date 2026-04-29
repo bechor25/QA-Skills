@@ -159,9 +159,73 @@ Emit the following JSON. Write to stdout; do NOT write to disk (orchestrator han
     "has_db": true,
     "has_api": true,
     "has_frontend": true
-  }
+  },
+  "external_integrations": [
+    { "vendor": "stripe", "sdk": "stripe", "file": "src/payments/charge.ts" }
+  ],
+  "uploads": [
+    { "route": "POST /files/upload", "file": "src/routes/files.ts" }
+  ],
+  "graphql": {
+    "schema_path": "src/schema.graphql",
+    "resolvers": ["src/resolvers/user.ts"]
+  },
+  "state_machines": [
+    { "name": "OrderStatus", "states": ["pending", "paid", "shipped", "cancelled"], "file": "src/models/order.ts" }
+  ]
 }
 ```
+
+## Phase 3 — Extended detections
+
+After per-file analysis, scan for these additional signals. Each defaults to `[]` / `null`
+so existing skills tolerate their absence.
+
+### External integrations
+
+Detect third-party SDK usage. Output `external_integrations: [{vendor, sdk, file}]`.
+
+```
+stripe:         /stripe\.|Stripe\(/i
+twilio:         /twilio\.|TwilioClient/i
+sendgrid:       /sendgrid\.|SendGrid/i
+aws:            /aws-sdk|@aws-sdk|boto3|AmazonS3/i
+slack:          /WebClient|@slack\/web-api|slack_sdk/i
+telegram:       /python-telegram-bot|telegraf|telebot/i
+```
+
+### File upload detection
+
+Output `uploads: [{route, file}]` when upload middleware found:
+```
+multer:         /multer\(\)|upload\.(single|array|fields)\(/
+formdata_js:    /FormData\(\)|req\.files/
+iformfile:      /IFormFile/
+flask_upload:   /request\.files/
+```
+
+### GraphQL detection
+
+Output `graphql: { schema_path, resolvers: [] }` or `null`:
+```
+schema files:   /*.graphql$|/*.gql$/
+resolvers_js:   /resolver|Resolver/i in *.ts/*.js
+apollo:         /ApolloServer|@Resolver\(/
+strawberry:     /strawberry\.|@strawberry/
+```
+
+### State machine detection
+
+Output `state_machines: [{name, states: [], file}]`:
+Detect enum/union types used inside switch statements.
+```python
+# TypeScript: enum Foo { A, B, C } + switch (x) { case Foo.A:
+# Python: class Status(Enum) + if status ==
+# Java: enum Status + switch(status)
+# Pattern: find enum definition, check if enum values appear in switch/if-else chains
+```
+
+---
 
 ## What humans miss
 

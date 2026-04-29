@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CodeAnalysis",
+  "type": "object",
+  "required": ["language", "scanned_at", "project_root", "modules", "routes", "stats"],
+  "properties": {
+    "language": { "type": "string" },
+    "additional_languages": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "scanned_at": { "type": "string", "format": "date-time" },
+    "project_root": { "type": "string" },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "hash", "type"],
+        "properties": {
+          "path": { "type": "string" },
+          "hash": { "type": "string" },
+          "type": { "type": "string", "enum": ["service", "controller", "model", "util", "middleware", "frontend"] },
+          "exports": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "dependencies": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "has_db_queries": { "type": "boolean", "default": false },
+          "has_http_calls": { "type": "boolean", "default": false },
+          "has_auth": { "type": "boolean", "default": false },
+          "input_fields": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "diff_class": { "type": "string", "enum": ["signature_changed", "body_changed", "trivial", "unchanged", "unknown"], "default": "unknown" }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["method", "path", "handler", "file"],
+        "properties": {
+          "method": { "type": "string" },
+          "path": { "type": "string" },
+          "handler": { "type": "string" },
+          "file": { "type": "string" },
+          "requires_auth": { "type": "boolean", "default": false }
+        }
+      }
+    },
+    "frontend_files": { "type": "array", "default": [] },
+    "stats": {
+      "type": "object",
+      "properties": {
+        "total_files": { "type": "integer" },
+        "by_type": { "type": "object" },
+        "has_auth": { "type": "boolean" },
+        "has_db": { "type": "boolean" },
+        "has_api": { "type": "boolean" },
+        "has_frontend": { "type": "boolean" }
+      }
+    },
+    "warnings": { "type": "array", "default": [] },
+    "skipped_files": { "type": "array", "default": [] },
+    "external_integrations": { "type": "array", "default": [] },
+    "uploads": { "type": "array", "default": [] },
+    "graphql": { "type": ["object", "null"], "default": null },
+    "state_machines": { "type": "array", "default": [] }
+  }
+}

@@ -88,17 +88,89 @@ Ask the user for `project_path` if not provided. Do not assume CWD.
 
 ---
 
+## RunContext construction
+
+Before any phase begins, build the shared `RunContext` object and pass it to every sub-skill:
+
+```python
+import uuid, os, datetime
+
+run_id = str(uuid.uuid4())
+checkpoint_dir = os.path.join(project_path, ".qa-skills", "checkpoints")
+logs_dir = os.path.join(project_path, ".qa-skills", "logs", run_id)
+os.makedirs(checkpoint_dir, exist_ok=True)
+os.makedirs(logs_dir, exist_ok=True)
+
+context = {
+    "run_id": run_id,
+    "project_root": project_path,
+    "language": None,         # filled after Phase 1
+    "additional_languages": [],
+    "analysis": None,         # filled after Phase 1
+    "changed_modules": [],    # filled after Phase 2
+    "user_locale": detect_locale(user_message),   # "he" or "en"
+    "categories_enabled": categories or ["unit", "api", "ui", "security", "a11y", "contract"],
+    "checkpoint_dir": checkpoint_dir,
+    "logs_dir": logs_dir,
+    "budget": {"max_seconds_per_skill": 600, "max_tests_per_module": 30}
+}
+```
+
+`detect_locale`: if user's message contains Hebrew characters → "he", else "en".
+
+---
+
+## Resume check (before Phase 1)
+
+```python
+checkpoint_path = os.path.join(checkpoint_dir, "run.json")
+if os.path.exists(checkpoint_path):
+    with open(checkpoint_path) as f:
+        prior = json.load(f)
+    age_hours = (datetime.datetime.utcnow() - datetime.datetime.fromisoformat(
+                 prior["updated_at"].rstrip("Z"))).total_seconds() / 3600
+    if age_hours < 24 and not prior.get("completed"):
+        ask_user = get_message("resume_prompt", locale, phase=prior["phase_name"])
+        # If user confirms: restore context from prior, skip completed phases
+        # If user declines: proceed fresh
+```
+
+Write checkpoint after each phase:
+```python
+def write_checkpoint(phase: int, phase_name: str, completed_skills: list):
+    with open(checkpoint_path, "w") as f:
+        json.dump({
+            "run_id": run_id,
+            "phase": phase,
+            "phase_name": phase_name,
+            "completed_skills": completed_skills,
+            "started_at": run_start_iso,
+            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "completed": False
+        }, f, indent=2)
+```
+
+---
+
 ## Phase 1 — Scan
 
 **Read `~/.claude/skills/code-analyzer/SKILL.md` and follow its instructions on `project_path`.**
 
-Capture full JSON output as `analysis`. Display to user (in their language):
+Capture full JSON output as `analysis`. Update `context["analysis"]` and `context["language"]`.
+
+Display to user (use `get_message()` from `skills/_shared/validate.py`):
 ```
-Scanning {project_path}...
-Found: {stats.total_files} files | {language} |
-  {stats.has_api ? "API ✓" : ""} {stats.has_frontend ? "UI ✓" : ""}
-  {stats.has_db ? "DB ✓" : ""} {stats.has_auth ? "Auth ✓" : ""}
+scan_start → scan_done → capabilities_found
 ```
+
+Write checkpoint: `write_checkpoint(1, "scan", ["code-analyzer"])`.
+
+After scan, **invoke `git-diff-analyzer`**:
+Read `~/.claude/skills/git-diff-analyzer/SKILL.md`, pass context, get back updated `analysis.modules` with `diff_class` added.
+
+**Then invoke `env-validator`**:
+Read `~/.claude/skills/env-validator/SKILL.md`, pass context.
+Replace `context["categories_enabled"]` with `env_report["categories_remaining"]`.
 
 ---
 
@@ -123,22 +195,31 @@ new_modules = [m for m in analysis["modules"]
                if m["path"] not in state["modules"]]
 ```
 
+Apply `diff_class` filter on top of hash check:
+```python
+# After identifying changed_modules by hash:
+for m in changed_modules:
+    dc = m.get("diff_class", "unknown")
+    if dc == "trivial":
+        changed_modules.remove(m)
+        # Log: "Trivial change in {path} — skipping test update"
+```
+
 If `changed_modules + new_modules` is empty:
-→ Tell user "No changes detected since last run. Use force_full=true to regenerate all."
+→ Tell user (using message key `state_no_change`)
 → Still run coverage-reporter and html-reporter with existing data.
 → Exit early after report.
 
-Display:
-```
-State found. Changed: {len(changed_modules)} | New: {len(new_modules)} | Unchanged: {unchanged_count}
-Running incremental update...
-```
+Display using `state_changed` message key.
 
 **If no state file:**
 - `changed_modules` = all modules in `analysis["modules"]`
-- Display: `No prior state. Running full scan...`
+- Display using `state_no_prior` message key.
 
 **`run_type`** = `"incremental"` if state existed, `"full"` otherwise.
+
+Update context: `context["changed_modules"] = changed_modules`.
+Write checkpoint: `write_checkpoint(2, "state_check", [])`.
 
 ---
 
@@ -155,26 +236,61 @@ Based on `analysis` and `changed_modules`, decide which skills to invoke.
 | `analysis.routes` non-empty AND changed modules include controller/route files | `api-test` |
 | Any changed module has `has_auth: true` OR `has_db_queries: true` OR non-empty `input_fields` | `security-test` |
 
+Also add new categories based on `context.categories_enabled`:
+- `a11y` in enabled AND `has_frontend` → `accessibility-test`
+- `contract` in enabled AND routes non-empty → `contract-test`
+
 Override: if `categories` parameter provided, only dispatch listed categories.
 
 ### How to invoke each skill
 
 For each skill to invoke, **read its SKILL.md from `~/.claude/skills/<skill-name>/SKILL.md`**
-and follow its instructions. Pass the following input:
+and follow its instructions. Pass the full `RunContext` (not individual fields).
 
-```json
-{
-  "modules": ["only changed_modules relevant to this skill"],
-  "routes": ["from analysis, filtered to changed controllers"],
-  "project_root": "string",
-  "language": "string",
-  "run_type": "full | incremental"
-}
+Run `unit-test`, `ui-playwright`, `api-test`, `security-test`, `accessibility-test`, `contract-test`
+**in parallel** when all inputs are ready.
+
+### Failure isolation
+
+Wrap each skill invocation:
+```python
+def invoke_skill_safe(skill_name: str, context: dict) -> list:
+    try:
+        result = invoke_skill(skill_name, context)
+        # Validate output against test_output schema
+        ok, errors = validate_or_warn(result, "test_output")
+        if not ok:
+            log_warn(f"skill_invalid_output: {skill_name}: {errors}")
+            return [{"source_module": "unknown", "path": "", "tests_written": 0,
+                     "status": "error", "error_message": f"Invalid output: {errors}"}]
+        return result
+    except TimeoutError:
+        log_warn(get_message("skill_timeout", locale, skill=skill_name,
+                             seconds=context["budget"]["max_seconds_per_skill"]))
+        return [{"source_module": "unknown", "path": "", "tests_written": 0,
+                 "status": "partial", "error_message": "timeout"}]
+    except Exception as e:
+        log_warn(get_message("skill_error", locale, skill=skill_name, error=str(e)))
+        return [{"source_module": "unknown", "path": "", "tests_written": 0,
+                 "status": "error", "error_message": str(e)}]
 ```
 
-Run `unit-test`, `ui-playwright`, `api-test`, `security-test` **in parallel** when all inputs are ready.
+All skills run regardless of individual failures. Never abort the full run.
 
-Collect output from each: list of `{ file, tests_written, path, source_module }`.
+### Deduplication
+
+After collecting all outputs, deduplicate by `assertions_covered`:
+```python
+seen_assertions = set()
+for output_list in all_test_outputs:
+    for item in output_list:
+        filtered = [a for a in item.get("assertions_covered", [])
+                    if a not in seen_assertions]
+        seen_assertions.update(item.get("assertions_covered", []))
+        item["assertions_covered"] = filtered
+```
+
+Collect output from each: list of `{ source_module, tests_written, path, status, assertions_covered }`.
 
 ---
 
@@ -306,22 +422,73 @@ If a test skill fails for specific modules:
 
 ---
 
+## Quality Score
+
+Compute after Phase 6 (Execute & Verify), before final report:
+
+```python
+def compute_quality_score(report_data: dict) -> int:
+    coverage = report_data.get("coverage_by_category", {})
+    score = 0
+
+    # Coverage weighted sum (max 80 points)
+    weights = {"unit": 0.3, "api": 0.3, "ui": 0.2, "security": 0.2}
+    for cat, weight in weights.items():
+        pct = coverage.get(cat, {}).get("pct", 0)
+        score += int(pct * weight * 0.8)
+
+    # Penalties
+    flaky = len(report_data.get("flaky_tests", []))
+    high_gaps = len([g for g in report_data.get("gaps", []) if g.get("severity") == "high"])
+    score -= flaky * 2
+    score -= high_gaps * 5
+
+    # Bonuses
+    contract_cat = coverage.get("contract", {})
+    if contract_cat.get("pct", 0) == 100:
+        score += 5
+    a11y_cat = coverage.get("a11y", {})
+    if a11y_cat.get("critical_violations", 1) == 0:
+        score += 3
+
+    return max(0, min(100, score))
+```
+
+Add `quality_score` to `report_data`. Pass to html-reporter so it appears in the header.
+
+---
+
+## Checkpoint completion
+
+After report is open, mark run as complete:
+```python
+import json
+with open(checkpoint_path) as f:
+    cp = json.load(f)
+cp["completed"] = True
+cp["updated_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+with open(checkpoint_path, "w") as f:
+    json.dump(cp, f, indent=2)
+```
+
+---
+
 ## Final summary (print after report opens)
+
+Use message keys from `skills/_shared/messages/{locale}.json`:
 
 **Hebrew:**
 ```
-✅ הושלם.
-   בדיקות חדשות: {new_count}
-   עודכנו: {updated_count}
-   ללא שינוי: {unchanged_count}
-   📄 דוח: {report_path}
+run_done      → "✅ הושלם. ציון איכות: {score}/100"
+run_summary   → "   חדשות: {new} | עודכנו: {updated} | יציבות: {flaky} לא יציבות"
+run_recommendation → "   המלצה: {gaps} פערים בעדיפות גבוהה — דוח פתוח בדפדפן."
+report_opened → "📄 הדוח נפתח בדפדפן: {path}"
 ```
 
 **English:**
 ```
-✅ Done.
-   New tests:   {new_count}
-   Updated:     {updated_count}
-   Unchanged:   {unchanged_count}
-   📄 Report:   {report_path}
+run_done      → "✅ Done. Quality score: {score}/100"
+run_summary   → "   New: {new} | Updated: {updated} | Unstable: {flaky} flaky"
+run_recommendation → "   {gaps} high-priority gaps — report opened in browser."
+report_opened → "📄 Report opened in browser: {path}"
 ```

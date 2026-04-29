@@ -1,14 +1,12 @@
 import express from 'express';
-import { authRouter } from './routes/auth';
-import { usersRouter } from './routes/users';
-import { authMiddleware } from './middleware/auth';
+import { authRouter } from './auth';
+import { usersRouter } from './users';
 
 export const app = express();
 app.use(express.json());
-
 app.use('/auth', authRouter);
-app.use('/users', authMiddleware, usersRouter);
+app.use('/users', usersRouter);
 
 if (require.main === module) {
-  app.listen(3000, () => console.log('Server running on port 3000'));
+  app.listen(3000, () => console.log('Fixture app running on :3000'));
 }

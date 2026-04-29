@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RunContext",
+  "type": "object",
+  "required": ["run_id", "project_root", "language", "user_locale", "categories_enabled"],
+  "properties": {
+    "run_id": { "type": "string" },
+    "project_root": { "type": "string" },
+    "language": { "type": "string", "enum": ["typescript", "javascript", "python", "java", "kotlin", "csharp", "multi"] },
+    "additional_languages": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "analysis": { "type": ["object", "null"] },
+    "changed_modules": { "type": "array", "default": [] },
+    "user_locale": { "type": "string", "enum": ["he", "en"], "default": "en" },
+    "categories_enabled": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["unit", "api", "ui", "security", "a11y", "contract", "flaky", "env", "diff", "mutation", "performance"] }
+    },
+    "checkpoint_dir": { "type": "string" },
+    "logs_dir": { "type": "string" },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "max_seconds_per_skill": { "type": "integer", "default": 600 },
+        "max_tests_per_module": { "type": "integer", "default": 30 }
+      }
+    }
+  }
+}
