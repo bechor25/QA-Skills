@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "qa-skills",
+  "description": "Full QA test suite generator — unit, API, UI, and security tests for any codebase. Works in Hebrew and English.",
+  "owner": {
+    "name": "Bechor Simhaev",
+    "url": "https://github.com/bechor25"
+  },
+  "plugins": [
+    {
+      "name": "qa-skills",
+      "description": "Automatically generate, run, and report on a full test suite. Type one sentence in Hebrew or English — Claude handles everything and opens an HTML report.",
+      "source": "./",
+      "category": "testing"
+    }
+  ]
+}

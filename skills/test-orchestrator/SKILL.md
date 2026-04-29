@@ -59,21 +59,21 @@ Running tests and checking results...
 This orchestrator delegates to the following sub-skills. When instructed to invoke a sub-skill,
 read its SKILL.md file and follow its instructions.
 
-Find the qa-skills root (the directory containing `test-orchestrator/`) and read from there:
+All skills install to `~/.claude/skills/`. Read from there:
 
 ```
-{QA_SKILLS_ROOT}/shared/code-analyzer/SKILL.md
-{QA_SKILLS_ROOT}/shared/coverage-reporter/SKILL.md
-{QA_SKILLS_ROOT}/shared/html-reporter/SKILL.md
-{QA_SKILLS_ROOT}/unit-test/SKILL.md
-{QA_SKILLS_ROOT}/api-test/SKILL.md
-{QA_SKILLS_ROOT}/security-test/SKILL.md
-{QA_SKILLS_ROOT}/ui-playwright/SKILL.md
+~/.claude/skills/code-analyzer/SKILL.md
+~/.claude/skills/coverage-reporter/SKILL.md
+~/.claude/skills/html-reporter/SKILL.md
+~/.claude/skills/unit-test/SKILL.md
+~/.claude/skills/api-test/SKILL.md
+~/.claude/skills/security-test/SKILL.md
+~/.claude/skills/ui-playwright/SKILL.md
 ```
 
-To find QA_SKILLS_ROOT, run:
+If `~/.claude/skills/` is not found (non-standard install), locate the skill directory by running:
 ```bash
-find . -name "test-orchestrator" -type d 2>/dev/null | head -1 | xargs dirname
+find ~ -name "code-analyzer" -path "*/skills/*" -type d 2>/dev/null | head -1 | xargs dirname
 ```
 
 ## Inputs
@@ -90,7 +90,7 @@ Ask the user for `project_path` if not provided. Do not assume CWD.
 
 ## Phase 1 — Scan
 
-**Read `{QA_SKILLS_ROOT}/shared/code-analyzer/SKILL.md` and follow its instructions on `project_path`.**
+**Read `~/.claude/skills/code-analyzer/SKILL.md` and follow its instructions on `project_path`.**
 
 Capture full JSON output as `analysis`. Display to user (in their language):
 ```
@@ -159,7 +159,7 @@ Override: if `categories` parameter provided, only dispatch listed categories.
 
 ### How to invoke each skill
 
-For each skill to invoke, **read its SKILL.md** (paths listed in "Sub-skills location" above)
+For each skill to invoke, **read its SKILL.md from `~/.claude/skills/<skill-name>/SKILL.md`**
 and follow its instructions. Pass the following input:
 
 ```json
@@ -219,7 +219,7 @@ with open(f"{project_path}/test-state.json", "w") as f:
 
 ## Phase 5 — Report
 
-**Read `{QA_SKILLS_ROOT}/shared/coverage-reporter/SKILL.md` and follow its instructions.**
+**Read `~/.claude/skills/coverage-reporter/SKILL.md` and follow its instructions.**
 
 Pass:
 - `analysis` (full analyzer output)

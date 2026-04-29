@@ -52,16 +52,22 @@ You only need to provide the project path. Everything else is automatic.
 
 ```
 qa-skills/
+├── .claude-plugin/
+│   ├── plugin.json             ← plugin metadata
+│   └── marketplace.json        ← marketplace listing
+├── skills/                     ← all skills live here
+│   ├── test-orchestrator/SKILL.md  ← main entry point
+│   ├── unit-test/SKILL.md
+│   ├── api-test/SKILL.md
+│   ├── security-test/SKILL.md
+│   ├── ui-playwright/SKILL.md
+│   ├── code-analyzer/SKILL.md
+│   ├── coverage-reporter/SKILL.md
+│   └── html-reporter/SKILL.md
 ├── AGENT.md                    ← this file
-├── test-orchestrator/SKILL.md  ← main entry point
-├── unit-test/SKILL.md
-├── api-test/SKILL.md
-├── security-test/SKILL.md
-├── ui-playwright/SKILL.md
-└── shared/
-    ├── code-analyzer/SKILL.md
-    ├── coverage-reporter/SKILL.md
-    └── html-reporter/SKILL.md
+├── USAGE.md
+└── install.sh                  ← for local dev (symlinks)
 ```
 
-When the orchestrator needs to invoke a sub-skill, read that sub-skill's SKILL.md from this directory structure.
+When installed (plugin or symlinks), all skills live at `~/.claude/skills/<skill-name>/`.
+The orchestrator reads sub-skills from `~/.claude/skills/<skill-name>/SKILL.md`.
