@@ -1,154 +1,57 @@
-# QA Skills - Test Coverage Report
+# QA Skills for Claude Code
 
-## 📊 TypeScript-Express Project Test Report
+A Claude Code plugin that auto-generates, runs, and reports on tests for any codebase.
+Designed for manual QA testers — no coding required.
 
-**Generated:** 2026-04-28 12:00 UTC  
-**Run Type:** Full Test Suite  
+## Quick start
 
-### 🎯 Coverage Summary
-
-| Metric | Value |
-|--------|-------|
-| Files Scanned | 8 |
-| Files with Tests | 5 (62.5%) |
-| New Tests Generated | 108 |
-| **Overall Coverage** | **72%** |
-
-### 📈 Coverage by Category
-
-| Category | Coverage | Details |
-|----------|----------|---------|
-| **Unit Tests** | 75% | 3 of 4 files covered |
-| **API Tests** | 67% | 2 of 3 files covered |
-| **Security Tests** | 80% | 4 of 5 files covered |
-| **UI Tests** | 0% | 0 of 1 files covered |
-
----
-
-## 📋 Module Status
-
-### ✅ Covered Modules
-- `src/routes/auth.ts` — Auth route endpoints fully tested
-- `src/routes/users.ts` — User route endpoints fully tested
-- `src/services/userService.ts` — User service logic covered
-- `src/middleware/auth.ts` — Auth middleware tested
-- `src/models/User.ts` — User model covered
-
-**Tests Generated:** 5 test files  
-
-### ⚠️ Partially Covered / Uncovered
-| Module | Status | Issues |
-|--------|--------|--------|
-| `src/app.ts` | ❌ Uncovered | HTTP handler untested — request parsing, response format, and error codes not verified |
-| `src/components/LoginForm.tsx` | ❌ Uncovered | No UI tests — form submission, validation feedback, and loading states unverified |
-| `src/models/db.ts` | ⚠️ Low Priority | Module exports 1 symbol with no test coverage |
-
----
-
-## 🔴 Critical Gaps
-
-1. **src/app.ts** (HIGH PRIORITY)  
-   - HTTP handler untested
-   - Request parsing not verified
-   - Response format and error codes untested
-
-2. **src/components/LoginForm.tsx** (MEDIUM PRIORITY)  
-   - No UI tests implemented
-   - Form submission flow unverified
-   - Loading states not tested
-
----
-
-## 🔒 Security Blind Spots
-
-| Module | Issue | Category |
-|--------|-------|----------|
-| `src/services/userService.ts` | ⏱️ No timing attack test — response time may leak whether user exists | Security |
-| `src/services/userService.ts` | 🔄 No concurrent execution test — race condition under parallel calls undetected | Concurrency |
-| `src/routes/auth.ts` | 🌐 No CORS header test — cross-origin access policy unverified | Security |
-| `src/routes/users.ts` | 🌐 No CORS header test — cross-origin access policy unverified | Security |
-| `src/components/LoginForm.tsx` | 📱 No loading state test — UI may show broken state while fetching data | UI |
-
----
-
-## 📌 Top Recommendations
-
-1. **Add tests for src/app.ts** (Priority: 1)  
-   Focus on HTTP handler, request parsing, and response validation
-
-2. **Add security tests for src/services/userService.ts** (Priority: 2)  
-   Implement timing attack tests and concurrent execution tests
-
-3. **Add CORS header validation** (Priority: 3)  
-   Test cross-origin policies in auth and users routes
-
-4. **Add UI tests for LoginForm.tsx** (Priority: 4)  
-   Test form submission, validation feedback, and loading states
-
----
-
-## 📄 Full Interactive Report
-
-### Coverage Snapshot
-```
-┌─────────────────────────────────────────────────────────┐
-│                  TEST COVERAGE REPORT                   │
-│            TypeScript-Express Project                   │
-│         Generated: 2026-04-28 12:00 UTC                 │
-├─────────────────────────────────────────────────────────┤
-│  UNIT       UI        API      SECURITY                 │
-│  75%        0%        67%      80%                       │
-│  ████░      ░░░░░     ███░░    ████░                    │
-│  3/4 files  0/1 files 2/3 file 4/5 files               │
-├─────────────────────────────────────────────────────────┤
-│ 📊 8 Files Scanned  │ ✅ 108 Tests Generated            │
-│ 📈 Overall: 72% Coverage                               │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 🔗 Interactive Test Report
-
-
-📄 לחץ כאן לצפייה בדוח:
-[📊 View HTML Report](test/fixtures/typescript-express/test-reports/report-typescript-express-20260428-1200.html)
-
-
-**To view locally:**
+**Install:**
 ```bash
-# macOS
-open test/fixtures/typescript-express/test-reports/report-typescript-express-20260428-1200.html
-
-# Linux
-firefox test/fixtures/typescript-express/test-reports/report-typescript-express-20260428-1200.html
-
-# Or copy the path and open in your browser
+curl -fsSL https://raw.githubusercontent.com/bechorsimhaev/QA-Skills/main/install.sh | bash
 ```
 
-### Report Features
-- 🎯 Real-time coverage gauges for each test category
-- 📋 Detailed module breakdown with test status
-- 🔍 Search and filter capabilities  
-- 🎨 Dark mode support
-- 📱 Responsive design for all devices
-
----
-
-## 🛠️ Test Files Generated
-
+**Use** — open Claude Code in any project and type:
 ```
-tests/
-├── api/
-│   ├── auth.api.test.ts      ✅ Auth API endpoints
-│   └── users.api.test.ts     ✅ User API endpoints
-├── security/
-│   └── auth.security.test.ts ✅ Auth security tests
-└── unit/
-    ├── middleware/
-    │   └── auth.test.ts      ✅ Auth middleware
-    └── services/
-        └── userService.test.ts ✅ User service logic
+generate tests for my project
+```
+or in Hebrew:
+```
+צור בדיקות לפרויקט שלי
 ```
 
----
+That's it. Claude will ask for the project path if needed and handle everything else.
 
-**Generated by QA Skills Test Orchestrator**
+## What you get
+
+- Unit tests, API tests, UI tests (Playwright), security tests, accessibility tests, and contract tests — all generated and run automatically
+- An HTML report with a Quality Score (0–100), coverage by category, blind spots, and recommendations
+- Flaky test detection — tests re-run 3× after passing; unstable ones are flagged with a cause and fix hint
+- Incremental runs — only changed files are re-tested after the first run
+- Resume — if a run is interrupted, Claude picks up where it left off
+
+## Supported languages
+
+TypeScript / JavaScript · Python · Java · C# / .NET
+
+## Skills in this system
+
+| Skill | Role |
+|-------|------|
+| `test-orchestrator` | Main entry point — coordinates everything |
+| `unit-test` | Unit tests (functions, classes, edge cases, timezone/float bugs) |
+| `api-test` | API/HTTP tests — auth matrix, concurrency, schema validation |
+| `ui-playwright` | E2E browser tests — flows, session, multi-tab, RTL |
+| `security-test` | OWASP Top 10 + JWT confusion + SSRF + open redirect |
+| `accessibility-test` | WCAG 2.1 AA — axe-core, focus order, headings, RTL |
+| `contract-test` | OpenAPI schema conformance or golden-master drift |
+| `flaky-detector` | Re-runs suite 3×, reports non-deterministic tests |
+| `env-validator` | Checks toolchain, framework, server, DB, disk |
+| `git-diff-analyzer` | Classifies changes (trivial/body/signature) |
+| `code-analyzer` | Scans codebase — routes, integrations, state machines |
+| `coverage-reporter` | Aggregates results + Quality Score |
+| `html-reporter` | Self-contained HTML report |
+
+## Documentation
+
+- [USAGE.md](USAGE.md) — full usage guide (English + Hebrew)
+- [AGENT.md](AGENT.md) — all trigger phrases and skill details

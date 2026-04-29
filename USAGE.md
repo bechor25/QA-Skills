@@ -27,47 +27,69 @@ run tests and show me a report
 I need tests
 ```
 
+For specific test types:
+```
+test accessibility           ← WCAG 2.1 AA checks
+contract test                ← validate API schema
+security test                ← OWASP + JWT + SSRF
+```
+
 Claude will ask for the project path if you haven't provided one. That's the only question it will ask.
 
 ### What happens automatically
 
 ```
-1. Scans your codebase (all files, all languages)
-2. Checks what changed since the last run (skips unchanged files)
-3. Generates tests in parallel:
+1. Validates environment  — checks toolchain, test framework, server, disk space
+2. Analyzes changes       — git diff to skip trivial edits (comments, whitespace)
+3. Scans codebase         — routes, integrations, GraphQL, state machines
+4. Generates tests in parallel:
    - Unit tests        → for every function and class
    - API tests         → for every HTTP endpoint
    - UI tests          → for every frontend page/flow (Playwright)
-   - Security tests    → for auth, injection, XSS, IDOR, and more
-4. Runs all generated tests
-5. Fixes failing tests automatically (up to 3 attempts)
-6. Opens an HTML coverage report in your browser
+   - Security tests    → for auth, injection, XSS, IDOR, JWT confusion, SSRF
+   - Accessibility     → WCAG 2.1 AA via axe-core + keyboard navigation
+   - Contract tests    → OpenAPI conformance or golden-master drift
+5. Runs all generated tests
+6. Fixes failing tests automatically (up to 3 attempts per category)
+7. Detects flaky tests    — re-runs 3×, reports cause and fix hint
+8. Computes Quality Score (0–100) and opens HTML report in browser
 ```
+
+If the run is interrupted, Claude will offer to resume from where it stopped (within 24 hours).
 
 ### What you see at the end
 
 An HTML report with:
-- **Coverage gauges** — unit / API / UI / security percentages
-- **Module table** — every file, its status (covered / partial / uncovered), links to test files
-- **Gaps** — what's missing and why it matters (high / medium / low priority)
-- **Blind spots** — things human testers typically miss (timing attacks, race conditions, etc.)
-- **Timeline** — what ran, how long it took, what was skipped
+- **Quality Score** — 0–100 overall health signal
+- **Coverage gauges** — unit / API / UI / security / accessibility / contract
+- **Module table** — every file, status (covered / partial / uncovered), links to test files
+- **Flaky tests** — non-deterministic tests with cause and suggested fix
+- **Gaps** — what's missing and priority (high / medium / low)
+- **Blind spots** — things human testers typically miss (timing attacks, race conditions, RTL, etc.)
+- **Timeline** — what ran, how long, what was skipped and why
 
 ### Incremental runs
 
-After the first full run, subsequent runs are fast. Claude remembers which files were already tested
-(via `test-state.json`) and only processes files that changed.
+After the first full run, subsequent runs are fast. Claude uses git diff to detect what changed
+and classifies changes:
+
+| Change type | Action |
+|-------------|--------|
+| Comments / whitespace only | Skip — no new tests needed |
+| Function body changed | Re-run existing tests, fix failures |
+| Function signature / new route | Regenerate tests for that module |
+| New file | Generate from scratch |
 
 To force a full regeneration: `regenerate all tests` or `force full test run`.
 
 ### Supported languages and frameworks
 
-| Language | Unit tests | API tests | UI tests | Security tests |
-|----------|-----------|-----------|----------|----------------|
-| TypeScript / JavaScript | Jest / Vitest | supertest | Playwright | ✓ |
-| Python | pytest | httpx | Playwright | ✓ |
-| Java | JUnit 5 + Mockito | RestAssured | — | ✓ |
-| C# / .NET | NUnit + Moq | HttpClient | — | ✓ |
+| Language | Unit tests | API tests | UI tests | Security | Accessibility | Contract |
+|----------|-----------|-----------|----------|----------|--------------|---------|
+| TypeScript / JavaScript | Jest / Vitest | supertest | Playwright | ✓ | ✓ | ✓ |
+| Python | pytest | httpx | Playwright | ✓ | ✓ | ✓ |
+| Java | JUnit 5 + Mockito | RestAssured | — | ✓ | — | ✓ |
+| C# / .NET | NUnit + Moq | HttpClient | — | ✓ | — | ✓ |
 
 ### Standalone skill use (advanced)
 
@@ -79,6 +101,8 @@ Each skill can also be triggered directly if you only need one type of test:
 | Only API tests | `test my API endpoints` |
 | Only UI tests | `write Playwright tests for my frontend` |
 | Only security tests | `run a security audit on my project` |
+| Only accessibility | `test accessibility` / `WCAG` / `a11y` |
+| Only contract tests | `contract test` / `validate API schema` |
 | Just the report | `open the test report` / `regenerate the HTML report` |
 | Analyze structure | `map my project structure` / `show me all endpoints` |
 
@@ -86,7 +110,7 @@ Each skill can also be triggered directly if you only need one type of test:
 
 ```
 your-project/
-├── test-state.json              ← tracks which files were tested and their hashes
+├── test-state.json              ← tracks tested files, hashes, last run timestamp
 ├── test-reports/
 │   ├── report-data.json         ← raw coverage data
 │   └── report-{name}-{date}.html ← the HTML report (opens automatically)
@@ -94,21 +118,28 @@ your-project/
     ├── unit/                    ← unit test files
     ├── api/                     ← API test files
     ├── e2e/                     ← Playwright E2E tests
-    └── security/                ← security test files
+    ├── security/                ← security test files
+    ├── a11y/                    ← accessibility test files
+    └── contract/                ← contract test files
 ```
 
-### Skills in this system (for reference)
+### Skills reference
 
 | Skill | Role | Direct use? |
 |-------|------|-------------|
 | `test-orchestrator` | Main entry point | Yes — this is what you use |
-| `unit-test` | Generates unit tests | Standalone or via orchestrator |
-| `api-test` | Generates API tests | Standalone or via orchestrator |
-| `ui-playwright` | Generates Playwright E2E tests | Standalone or via orchestrator |
-| `security-test` | Generates security tests | Standalone or via orchestrator |
-| `code-analyzer` | Scans codebase structure | Internal (also: "map my project") |
-| `coverage-reporter` | Aggregates results | Internal |
-| `html-reporter` | Generates HTML report | Internal (also: "open test report") |
+| `unit-test` | Unit tests | Standalone or via orchestrator |
+| `api-test` | API tests | Standalone or via orchestrator |
+| `ui-playwright` | Playwright E2E tests | Standalone or via orchestrator |
+| `security-test` | Security tests | Standalone or via orchestrator |
+| `accessibility-test` | WCAG 2.1 AA tests | Standalone or via orchestrator |
+| `contract-test` | API schema conformance | Standalone or via orchestrator |
+| `flaky-detector` | Detects non-deterministic tests | Internal |
+| `env-validator` | Validates toolchain + environment | Internal |
+| `git-diff-analyzer` | Classifies code changes | Internal |
+| `code-analyzer` | Scans codebase structure | Internal |
+| `coverage-reporter` | Aggregates results + Quality Score | Internal |
+| `html-reporter` | Generates HTML report | Internal |
 
 ---
 
@@ -139,51 +170,72 @@ your-project/
 אני רוצה בדיקות
 ```
 
+לסוגי בדיקות ספציפיים:
+```
+בדוק נגישות         ← בדיקות WCAG 2.1 AA
+בדיקות חוזה         ← ולידציית schema של API
+בדיקות אבטחה        ← OWASP + JWT + SSRF
+```
+
 קלוד ישאל לנתיב הפרויקט אם לא סיפקת אחד. זו השאלה היחידה שהוא ישאל.
 
 ### מה קורה אוטומטית
 
 ```
-1. סורק את הקוד שלך (כל הקבצים, כל השפות)
-2. בודק מה השתנה מאז הריצה הקודמת (מדלג על קבצים שלא השתנו)
-3. מייצר בדיקות במקביל:
+1. בודק סביבה       — toolchain, test framework, שרת, מקום בדיסק
+2. מנתח שינויים     — git diff כדי לדלג על עריכות טריוויאליות (הערות, רווחים)
+3. סורק קוד         — routes, integrations, GraphQL, state machines
+4. מייצר בדיקות במקביל:
    - בדיקות יחידה   ← לכל פונקציה ומחלקה
    - בדיקות API     ← לכל endpoint HTTP
    - בדיקות UI      ← לכל עמוד/זרימה בממשק (Playwright)
-   - בדיקות אבטחה   ← אימות, הזרקות, XSS, IDOR, ועוד
-4. מריץ את כל הבדיקות שנוצרו
-5. מתקן בדיקות כושלות אוטומטית (עד 3 ניסיונות)
-6. פותח דוח כיסוי HTML בדפדפן
+   - בדיקות אבטחה   ← אימות, הזרקות, XSS, IDOR, JWT confusion, SSRF
+   - נגישות         ← WCAG 2.1 AA דרך axe-core + ניווט מקלדת
+   - חוזה           ← התאמה ל-OpenAPI או גילוי סטייה מ-golden master
+5. מריץ את כל הבדיקות
+6. מתקן בדיקות כושלות אוטומטית (עד 3 ניסיונות לכל קטגוריה)
+7. מגלה בדיקות flaky — מריץ שוב 3×, מדווח על סיבה ורמז לתיקון
+8. מחשב Quality Score (0–100) ופותח דוח HTML בדפדפן
 ```
+
+אם הריצה הופסקה באמצע — קלוד יציע להמשיך מאיפה שהפסיק (בתוך 24 שעות).
 
 ### מה רואים בסוף
 
 דוח HTML עם:
-- **מדדי כיסוי** — אחוזים לכל קטגוריה: יחידה / API / UI / אבטחה
-- **טבלת מודולים** — כל קובץ, הסטטוס שלו (מכוסה / חלקי / לא מכוסה), קישורים לקבצי הבדיקות
-- **פערים** — מה חסר ולמה זה חשוב (עדיפות גבוהה / בינונית / נמוכה)
-- **נקודות עיוורות** — דברים שבודקים אנושיים מחמיצים בדרך כלל (timing attacks, race conditions וכו')
-- **ציר זמן** — מה רץ, כמה זמן לקח, מה דולג
+- **Quality Score** — ציון בריאות כולל 0–100
+- **מדדי כיסוי** — יחידה / API / UI / אבטחה / נגישות / חוזה
+- **טבלת מודולים** — כל קובץ, סטטוס, קישורים לקבצי בדיקות
+- **בדיקות flaky** — בדיקות לא יציבות עם סיבה ורמז לתיקון
+- **פערים** — מה חסר ועדיפות (גבוהה / בינונית / נמוכה)
+- **נקודות עיוורות** — דברים שבודקים אנושיים מחמיצים (timing attacks, race conditions, RTL וכו')
+- **ציר זמן** — מה רץ, כמה זמן, מה דולג ולמה
 
 ### ריצות מצטברות
 
-אחרי הריצה המלאה הראשונה, ריצות עוקבות הן מהירות. קלוד זוכר אילו קבצים כבר נבדקו
-(דרך `test-state.json`) ומעבד רק קבצים שהשתנו.
+אחרי הריצה המלאה הראשונה, ריצות עוקבות הן מהירות. קלוד משתמש ב-git diff כדי לזהות מה השתנה:
+
+| סוג שינוי | פעולה |
+|-----------|-------|
+| הערות / רווחים בלבד | דילוג — לא צריך בדיקות חדשות |
+| גוף הפונקציה השתנה | הרצת בדיקות קיימות, תיקון כשלים |
+| חתימת פונקציה / route חדש | יצירת בדיקות מחדש למודול |
+| קובץ חדש | יצירה מאפס |
 
 לאלץ בדיקה מחדש של הכל: `הרץ בדיקות מלאות מחדש` או `force full test run`.
 
 ### שפות וframeworks נתמכים
 
-| שפה | בדיקות יחידה | בדיקות API | בדיקות UI | בדיקות אבטחה |
-|-----|-------------|-----------|----------|--------------|
-| TypeScript / JavaScript | Jest / Vitest | supertest | Playwright | ✓ |
-| Python | pytest | httpx | Playwright | ✓ |
-| Java | JUnit 5 + Mockito | RestAssured | — | ✓ |
-| C# / .NET | NUnit + Moq | HttpClient | — | ✓ |
+| שפה | בדיקות יחידה | בדיקות API | בדיקות UI | אבטחה | נגישות | חוזה |
+|-----|-------------|-----------|----------|-------|--------|------|
+| TypeScript / JavaScript | Jest / Vitest | supertest | Playwright | ✓ | ✓ | ✓ |
+| Python | pytest | httpx | Playwright | ✓ | ✓ | ✓ |
+| Java | JUnit 5 + Mockito | RestAssured | — | ✓ | — | ✓ |
+| C# / .NET | NUnit + Moq | HttpClient | — | ✓ | — | ✓ |
 
 ### שימוש עצמאי בסקילים (מתקדם)
 
-כל סקיל יכול גם להיות מופעל ישירות אם רוצים רק סוג אחד של בדיקות:
+כל סקיל יכול גם להיות מופעל ישירות:
 
 | מה רוצים | מה לכתוב |
 |----------|----------|
@@ -191,6 +243,8 @@ your-project/
 | רק בדיקות API | `בדוק את ה-endpoints של ה-API שלי` |
 | רק בדיקות UI | `כתוב בדיקות Playwright לממשק שלי` |
 | רק בדיקות אבטחה | `הרץ בדיקת אבטחה על הפרויקט שלי` |
+| רק נגישות | `בדוק נגישות` / `WCAG` / `a11y` |
+| רק בדיקות חוזה | `בדיקות חוזה` / `בדוק schema` |
 | רק הדוח | `פתח את דוח הבדיקות` / `צור מחדש את ה-HTML report` |
 | ניתוח מבנה | `מפה את מבנה הפרויקט שלי` / `הצג את כל ה-endpoints` |
 
@@ -198,15 +252,17 @@ your-project/
 
 ```
 your-project/
-├── test-state.json                ← מעקב אחרי קבצים שנבדקו ו-hash שלהם
+├── test-state.json                ← מעקב אחרי קבצים שנבדקו, hash, חותמת זמן
 ├── test-reports/
 │   ├── report-data.json           ← נתוני כיסוי גולמיים
 │   └── report-{name}-{date}.html  ← דוח HTML (נפתח אוטומטית)
 └── tests/
-    ├── unit/                      ← קבצי בדיקות יחידה
-    ├── api/                       ← קבצי בדיקות API
+    ├── unit/                      ← בדיקות יחידה
+    ├── api/                       ← בדיקות API
     ├── e2e/                       ← בדיקות Playwright E2E
-    └── security/                  ← קבצי בדיקות אבטחה
+    ├── security/                  ← בדיקות אבטחה
+    ├── a11y/                      ← בדיקות נגישות
+    └── contract/                  ← בדיקות חוזה
 ```
 
 ### הסקילים במערכת (לעיון)
@@ -214,10 +270,15 @@ your-project/
 | סקיל | תפקיד | שימוש ישיר? |
 |------|--------|------------|
 | `test-orchestrator` | נקודת כניסה ראשית | כן — זה מה שאתה משתמש בו |
-| `unit-test` | מייצר בדיקות יחידה | עצמאי או דרך orchestrator |
-| `api-test` | מייצר בדיקות API | עצמאי או דרך orchestrator |
-| `ui-playwright` | מייצר בדיקות Playwright E2E | עצמאי או דרך orchestrator |
-| `security-test` | מייצר בדיקות אבטחה | עצמאי או דרך orchestrator |
-| `code-analyzer` | סורק מבנה קוד | פנימי (גם: "מפה את הפרויקט") |
-| `coverage-reporter` | מרכז תוצאות | פנימי |
-| `html-reporter` | מייצר דוח HTML | פנימי (גם: "פתח את הדוח") |
+| `unit-test` | בדיקות יחידה | עצמאי או דרך orchestrator |
+| `api-test` | בדיקות API | עצמאי או דרך orchestrator |
+| `ui-playwright` | בדיקות Playwright E2E | עצמאי או דרך orchestrator |
+| `security-test` | בדיקות אבטחה | עצמאי או דרך orchestrator |
+| `accessibility-test` | בדיקות WCAG 2.1 AA | עצמאי או דרך orchestrator |
+| `contract-test` | התאמת schema של API | עצמאי או דרך orchestrator |
+| `flaky-detector` | גילוי בדיקות לא יציבות | פנימי |
+| `env-validator` | בדיקת toolchain וסביבה | פנימי |
+| `git-diff-analyzer` | סיווג שינויי קוד | פנימי |
+| `code-analyzer` | סריקת מבנה קוד | פנימי |
+| `coverage-reporter` | ריכוז תוצאות + Quality Score | פנימי |
+| `html-reporter` | יצירת דוח HTML | פנימי |
