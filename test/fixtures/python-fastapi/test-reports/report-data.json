@@ -1,0 +1,248 @@
+{
+  "project_name": "python-fastapi",
+  "generated_at": "2026-04-29T12:00:00Z",
+  "run_type": "full",
+  "summary": {
+    "files_scanned": 6,
+    "files_with_tests": 3,
+    "new_tests_generated": 157,
+    "tests_updated": 0,
+    "tests_unchanged": 0
+  },
+  "coverage_by_category": {
+    "unit": {
+      "files": 3,
+      "covered": 1,
+      "pct": 33
+    },
+    "ui": {
+      "files": 0,
+      "covered": 0,
+      "pct": 0
+    },
+    "api": {
+      "files": 2,
+      "covered": 2,
+      "pct": 100
+    },
+    "security": {
+      "files": 3,
+      "covered": 2,
+      "pct": 67
+    }
+  },
+  "modules": [
+    {
+      "path": "app/database.py",
+      "language": "python",
+      "status": "uncovered",
+      "tests_generated": [],
+      "gaps": [
+        "DB operations untested \u2014 no verification that queries are correct or safe from injection"
+      ],
+      "blind_spots": []
+    },
+    {
+      "path": "app/main.py",
+      "language": "python",
+      "status": "uncovered",
+      "tests_generated": [],
+      "gaps": [
+        "App entry point untested \u2014 router wiring unverified"
+      ],
+      "blind_spots": []
+    },
+    {
+      "path": "app/models/user.py",
+      "language": "python",
+      "status": "uncovered",
+      "tests_generated": [],
+      "gaps": [
+        "Module exports fields/validators with no test coverage"
+      ],
+      "blind_spots": []
+    },
+    {
+      "path": "app/routes/auth.py",
+      "language": "python",
+      "status": "covered",
+      "tests_generated": [
+        "tests/api/test_auth.py",
+        "tests/security/test_auth_security.py"
+      ],
+      "gaps": [],
+      "blind_spots": [
+        "No timing attack test \u2014 bcrypt verification adds ~100ms; response time leaks whether email exists in DB"
+      ]
+    },
+    {
+      "path": "app/routes/users.py",
+      "language": "python",
+      "status": "covered",
+      "tests_generated": [
+        "tests/api/test_users.py",
+        "tests/security/test_injection.py",
+        "tests/security/test_exposure.py"
+      ],
+      "gaps": [],
+      "blind_spots": [
+        "No CORS header test \u2014 cross-origin access policy unverified",
+        "POST /users/ has no auth \u2014 unauthenticated users can create accounts and trigger DB queries"
+      ]
+    },
+    {
+      "path": "app/services/user_service.py",
+      "language": "python",
+      "status": "covered",
+      "tests_generated": [
+        "tests/unit/services/test_user_service.py"
+      ],
+      "gaps": [],
+      "blind_spots": [
+        "No idempotency test \u2014 calling create_user twice with same email tested only at API level, not unit level",
+        "SECRET_KEY defaults to 'change-me-in-production' \u2014 hardcoded fallback in production is a critical vulnerability"
+      ]
+    }
+  ],
+  "gaps": [
+    {
+      "module": "app/database.py",
+      "reason": "DB operations untested \u2014 no verification that queries are correct or safe from injection",
+      "severity": "high"
+    },
+    {
+      "module": "app/models/user.py",
+      "reason": "Module exports fields/validators with no test coverage",
+      "severity": "low"
+    },
+    {
+      "module": "app/main.py",
+      "reason": "App entry point untested \u2014 router wiring unverified",
+      "severity": "low"
+    }
+  ],
+  "blind_spots": [
+    {
+      "description": "No idempotency test \u2014 calling create_user twice with same email tested only at API level, not unit level",
+      "module": "app/services/user_service.py",
+      "category": "unit"
+    },
+    {
+      "description": "No timing attack test \u2014 bcrypt verification adds ~100ms; response time leaks whether email exists in DB",
+      "module": "app/routes/auth.py",
+      "category": "security"
+    },
+    {
+      "description": "No CORS header test \u2014 cross-origin access policy unverified",
+      "module": "app/routes/users.py",
+      "category": "security"
+    },
+    {
+      "description": "POST /users/ has no auth \u2014 unauthenticated users can create accounts and trigger DB queries",
+      "module": "app/routes/users.py",
+      "category": "security"
+    },
+    {
+      "description": "SECRET_KEY defaults to 'change-me-in-production' \u2014 hardcoded fallback in production is a critical vulnerability",
+      "module": "app/services/user_service.py",
+      "category": "security"
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": 1,
+      "text": "Add tests for app/database.py: DB operations untested \u2014 no verification that queries are correct or safe from injection",
+      "module": "app/database.py"
+    },
+    {
+      "priority": 2,
+      "text": "[SECURITY] POST /users/ has no auth \u2014 unauthenticated users can create accounts; consider adding rate limiting or captcha",
+      "module": "app/routes/users.py"
+    },
+    {
+      "priority": 3,
+      "text": "[SECURITY] SECRET_KEY defaults to 'change-me-in-production' \u2014 add env-var validation on startup to block insecure deployments",
+      "module": "app/services/user_service.py"
+    },
+    {
+      "priority": 4,
+      "text": "[SECURITY] No CORS header test \u2014 cross-origin access policy unverified \u2014 affects app/routes/users.py",
+      "module": "app/routes/users.py"
+    },
+    {
+      "priority": 5,
+      "text": "[SECURITY] Timing oracle: bcrypt lookup reveals whether email exists \u2014 consider hmac.compare_digest or dummy bcrypt on miss",
+      "module": "app/routes/auth.py"
+    }
+  ],
+  "timeline": [
+    {
+      "step": "code-analyzer",
+      "duration_ms": 800,
+      "status": "done"
+    },
+    {
+      "step": "unit-test",
+      "duration_ms": 5740,
+      "status": "done"
+    },
+    {
+      "step": "api-test",
+      "duration_ms": 6990,
+      "status": "done"
+    },
+    {
+      "step": "ui-playwright",
+      "duration_ms": 0,
+      "status": "skipped"
+    },
+    {
+      "step": "security-test",
+      "duration_ms": 6980,
+      "status": "done"
+    },
+    {
+      "step": "coverage-reporter",
+      "duration_ms": 200,
+      "status": "done"
+    },
+    {
+      "step": "execute-unit",
+      "duration_ms": 5740,
+      "status": "passed",
+      "iterations": 1
+    },
+    {
+      "step": "execute-api",
+      "duration_ms": 6990,
+      "status": "passed",
+      "iterations": 1
+    },
+    {
+      "step": "execute-security",
+      "duration_ms": 6980,
+      "status": "passed",
+      "iterations": 1
+    },
+    {
+      "step": "execute-ui",
+      "duration_ms": 0,
+      "status": "skipped",
+      "iterations": 0
+    }
+  ],
+  "warnings": [
+    {
+      "type": "unauthenticated_db_route",
+      "file": "app/routes/users.py",
+      "line_hint": "POST /users/ handler calls create_user() without auth check",
+      "severity": "high"
+    },
+    {
+      "type": "hardcoded_secret",
+      "file": "app/services/user_service.py",
+      "line_hint": "SECRET_KEY = os.getenv('SECRET_KEY', 'change-me-in-production')",
+      "severity": "high"
+    }
+  ]
+}
