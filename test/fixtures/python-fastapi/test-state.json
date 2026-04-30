@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "last_scan": "2026-04-30T07:42:24.200187+00:00",
+  "run_type": "full",
+  "modules": {
+    "src/auth.py": {
+      "hash": "9c168c0575e399c2d872f4203a76cadf7387b443a186e5b6855aa50fa679be91",
+      "tests_generated": [
+        "tests/unit/src/test_auth.py",
+        "tests/api/test_auth_api.py",
+        "tests/security/test_auth_security.py",
+        "tests/contract/test_api_contract.py"
+      ],
+      "execution_result": "passed",
+      "last_updated": "2026-04-30T07:42:24.200187+00:00"
+    },
+    "src/users.py": {
+      "hash": "046d9dc26d96dddec2f7883f4d6fb4634006b2503a9af0171e31c04e32a5a2b0",
+      "tests_generated": [
+        "tests/unit/src/test_users.py",
+        "tests/api/test_users_api.py",
+        "tests/security/test_auth_security.py",
+        "tests/contract/test_api_contract.py"
+      ],
+      "execution_result": "passed",
+      "last_updated": "2026-04-30T07:42:24.200187+00:00"
+    },
+    "main.py": {
+      "hash": "3a413910533cc7ffc7726cae8bc64d2b588e0c3d99cf5e2e3492ab460dd075a4",
+      "tests_generated": [],
+      "execution_result": "not_run",
+      "last_updated": "2026-04-30T07:42:24.200187+00:00"
+    }
+  }
+}

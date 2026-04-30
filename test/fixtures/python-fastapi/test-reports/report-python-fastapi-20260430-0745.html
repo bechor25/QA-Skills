@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="he">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Coverage — python-fastapi</title>
+  <style>
+    :root {
+      --red:#E53E3E;--orange:#DD6B20;--green:#38A169;--gray:#718096;
+      --bg:#F7FAFC;--surface:#FFFFFF;--border:#E2E8F0;
+      --text-primary:#2D3748;--text-secondary:#718096;
+      --badge-covered:#C6F6D5;--badge-partial:#FEFCBF;
+      --badge-uncovered:#FED7D7;--badge-unchanged:#EDF2F7;
+    }
+    @media(prefers-color-scheme:dark){
+      :root{--bg:#1A202C;--surface:#2D3748;--border:#4A5568;
+        --text-primary:#E2E8F0;--text-secondary:#A0AEC0;
+        --badge-covered:#22543D;--badge-partial:#744210;
+        --badge-uncovered:#742A2A;--badge-unchanged:#2D3748;}
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text-primary);}
+    .header{display:flex;justify-content:space-between;align-items:center;padding:1rem 2rem;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;}
+    .header h1{font-size:1.25rem;font-weight:700;}
+    .run-badge{display:inline-block;margin-left:.75rem;padding:.2rem .6rem;border-radius:999px;background:#EBF8FF;color:#2B6CB0;font-size:.75rem;font-weight:600;}
+    .btn-outline{padding:.4rem .9rem;border:1px solid var(--border);border-radius:6px;font-size:.8rem;color:var(--text-secondary);text-decoration:none;}
+    .scorecard{padding:2rem;background:var(--bg);text-align:center;}
+    .score-hero{display:flex;justify-content:center;align-items:center;gap:3rem;flex-wrap:wrap;margin-bottom:1.5rem;}
+    .gauge-grid{display:flex;gap:2rem;justify-content:center;flex-wrap:wrap;margin-bottom:1.5rem;}
+    .gauge-card{display:flex;flex-direction:column;align-items:center;gap:.5rem;}
+    .gauge-sub{font-size:.8rem;color:var(--text-secondary);}
+    .summary-pills{display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;}
+    .pill{padding:.35rem .75rem;background:var(--surface);border:1px solid var(--border);border-radius:999px;font-size:.8rem;color:var(--text-secondary);}
+    .section{padding:1.5rem 2rem;}
+    .section h2{font-size:1rem;font-weight:700;margin-bottom:1rem;}
+    .timeline-table{width:100%;border-collapse:collapse;font-size:.875rem;}
+    .timeline-table th{text-align:left;padding:.5rem .75rem;border-bottom:2px solid var(--border);color:var(--text-secondary);font-weight:600;}
+    .timeline-table td{padding:.5rem .75rem;border-bottom:1px solid var(--border);}
+    .status-icon.done,.status-icon.passed{color:var(--green);}
+    .status-icon.skipped{color:var(--gray);}
+    .status-icon.failed,.status-icon.error{color:var(--red);}
+    .duration{color:var(--text-secondary);font-variant-numeric:tabular-nums;}
+    .modules-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:.75rem;}
+    .filters{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;}
+    .filter-btn{padding:.3rem .75rem;border:1px solid var(--border);border-radius:6px;font-size:.8rem;background:var(--surface);color:var(--text-secondary);cursor:pointer;}
+    .filter-btn.active{background:var(--text-primary);color:#fff;border-color:var(--text-primary);}
+    .search-box{padding:.3rem .6rem;border:1px solid var(--border);border-radius:6px;font-size:.8rem;background:var(--surface);color:var(--text-primary);}
+    .module-table{width:100%;border-collapse:collapse;font-size:.8rem;}
+    .module-table th{text-align:left;padding:.5rem;border-bottom:2px solid var(--border);color:var(--text-secondary);}
+    .module-table td{padding:.5rem;border-bottom:1px solid var(--border);vertical-align:top;}
+    .module-path{font-family:monospace;font-size:.75rem;}
+    .lang-badge{padding:.1rem .4rem;background:#EBF8FF;color:#2B6CB0;border-radius:4px;font-size:.7rem;font-family:monospace;}
+    .status-badge{padding:.15rem .5rem;border-radius:999px;font-size:.72rem;font-weight:600;}
+    .status-badge.covered{background:var(--badge-covered);color:#22543D;}
+    .status-badge.partial{background:var(--badge-partial);color:#744210;}
+    .status-badge.uncovered{background:var(--badge-uncovered);color:#742A2A;}
+    .status-badge.unchanged{background:var(--badge-unchanged);color:var(--gray);}
+    .test-link{color:#3182CE;text-decoration:none;font-family:monospace;font-size:.72rem;}
+    .test-link:hover{text-decoration:underline;}
+    details>summary{cursor:pointer;color:var(--text-secondary);font-size:.8rem;}
+    details ul{margin:.25rem 0 0 1rem;padding:0;font-size:.75rem;}
+    details li{margin-bottom:.2rem;}
+    .gap-group{margin-bottom:1.5rem;}
+    .gap-group h3{font-size:.9rem;font-weight:700;margin-bottom:.75rem;}
+    .gap-card{padding:.75rem 1rem;border-left:4px solid;border-radius:0 6px 6px 0;margin-bottom:.5rem;background:var(--surface);}
+    .gap-card.high{border-color:var(--red);}
+    .gap-card.medium{border-color:var(--orange);}
+    .gap-card.low{border-color:var(--green);}
+    .gap-module{font-family:monospace;font-size:.75rem;color:var(--text-secondary);display:block;margin-bottom:.25rem;}
+    .gap-card p{margin:0;font-size:.85rem;}
+    .step-name{font-family:monospace;font-size:.8rem;}
+    footer{padding:1.5rem 2rem;border-top:1px solid var(--border);background:var(--surface);font-size:.8rem;color:var(--text-secondary);display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem;}
+    .footer-links{display:flex;gap:1rem;}
+    .footer-links a{color:var(--text-secondary);text-decoration:none;}
+    .footer-links a:hover{text-decoration:underline;}
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <h1>python-fastapi</h1>
+    <span class="run-badge">Full scan</span>
+  </div>
+  <div class="header-right">
+    <a class="btn-outline" href="file:///Users/bechorsimhaev/Desktop/code/QA-Skills/test/fixtures/python-fastapi/tests">Open tests folder</a>
+  </div>
+</header>
+
+<section class="scorecard">
+  <div class="score-hero">
+    <div>
+      <svg viewBox="0 0 140 140" width="140" height="140">
+        <circle cx="70" cy="70" r="58" fill="none" stroke="var(--border)" stroke-width="14"/>
+        <circle cx="70" cy="70" r="58" fill="none"
+          stroke="var(--orange)"
+          stroke-width="14"
+          stroke-dasharray="188.4 314"
+          stroke-dashoffset="78.5"
+          stroke-linecap="round"
+          transform="rotate(-90 70 70)"/>
+        <text x="70" y="65" text-anchor="middle" font-size="26" font-weight="700" fill="var(--text-primary)">60</text>
+        <text x="70" y="85" text-anchor="middle" font-size="12" fill="var(--text-secondary)">Quality Score</text>
+      </svg>
+    </div>
+    <div>
+      <p style="font-size:2rem;font-weight:800;color:var(--green);">157</p>
+      <p style="font-size:.9rem;color:var(--text-secondary);">בדיקות עברו ✅</p>
+      <p style="font-size:1rem;margin-top:.5rem;color:var(--text-secondary);">0 flaky | 0 failed</p>
+    </div>
+  </div>
+
+  <div class="gauge-grid">
+    <div class="gauge-card">
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/>
+        <circle cx="60" cy="60" r="50" fill="none"
+          stroke="var(--green)"
+          stroke-width="12"
+          stroke-dasharray="282.6 314"
+          stroke-dashoffset="78.5"
+          stroke-linecap="round"
+          transform="rotate(-90 60 60)"/>
+        <text x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text-primary)">90%</text>
+        <text x="60" y="74" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Unit</text>
+      </svg>
+      <p class="gauge-sub">54/60 checks</p>
+    </div><div class="gauge-card">
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/>
+        <circle cx="60" cy="60" r="50" fill="none"
+          stroke="var(--green)"
+          stroke-width="12"
+          stroke-dasharray="298.3 314"
+          stroke-dashoffset="78.5"
+          stroke-linecap="round"
+          transform="rotate(-90 60 60)"/>
+        <text x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text-primary)">95%</text>
+        <text x="60" y="74" text-anchor="middle" font-size="11" fill="var(--text-secondary)">API</text>
+      </svg>
+      <p class="gauge-sub">50/53 checks</p>
+    </div><div class="gauge-card">
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/>
+        <circle cx="60" cy="60" r="50" fill="none"
+          stroke="var(--green)"
+          stroke-width="12"
+          stroke-dasharray="251.2 314"
+          stroke-dashoffset="78.5"
+          stroke-linecap="round"
+          transform="rotate(-90 60 60)"/>
+        <text x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text-primary)">80%</text>
+        <text x="60" y="74" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Security</text>
+      </svg>
+      <p class="gauge-sub">18/22 checks</p>
+    </div><div class="gauge-card">
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/>
+        <circle cx="60" cy="60" r="50" fill="none"
+          stroke="var(--green)"
+          stroke-width="12"
+          stroke-dasharray="314.0 314"
+          stroke-dashoffset="78.5"
+          stroke-linecap="round"
+          transform="rotate(-90 60 60)"/>
+        <text x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text-primary)">100%</text>
+        <text x="60" y="74" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Contract</text>
+      </svg>
+      <p class="gauge-sub">19/19 checks</p>
+    </div>
+  </div>
+
+  <div class="summary-pills">
+    <span class="pill">📁 4 קבצים נסרקו</span>
+    <span class="pill">✅ 157 בדיקות נוצרו</span>
+    <span class="pill">🔒 4 קטגוריות: unit, api, security, contract</span>
+    <span class="pill">🐛 0 flaky</span>
+  </div>
+</section>
+
+<section class="section">
+  <h2>מה בוצע</h2>
+  <table class="timeline-table">
+    <thead><tr><th>שלב</th><th>תוצאה</th><th>משך</th></tr></thead>
+    <tbody><tr><td class="step-name">code-analyzer</td><td><span class="status-icon done">✓</span> DONE</td><td class="duration">850ms</td></tr><tr><td class="step-name">git-diff-analyzer</td><td><span class="status-icon done">✓</span> DONE</td><td class="duration">120ms</td></tr><tr><td class="step-name">env-validator</td><td><span class="status-icon done">✓</span> DONE</td><td class="duration">200ms</td></tr><tr><td class="step-name">unit-test</td><td><span class="status-icon done">✓</span> DONE</td><td class="duration">3200ms</td></tr><tr><td class="step-name">api-test</td><td><span class="status-icon done">✓</span> DONE</td><td class="duration">2100ms</td></tr><tr><td class="step-name">ui-playwright</td><td><span class="status-icon skipped">⟳</span> SKIPPED</td><td class="duration">—</td></tr><tr><td class="step-name">security-test</td><td><span class="status-icon done">✓</span> DONE</td><td class="duration">1800ms</td></tr><tr><td class="step-name">accessibility-test</td><td><span class="status-icon skipped">⟳</span> SKIPPED</td><td class="duration">—</td></tr><tr><td class="step-name">contract-test</td><td><span class="status-icon done">✓</span> DONE</td><td class="duration">1200ms</td></tr><tr><td class="step-name">execute-unit</td><td><span class="status-icon done">✓</span> PASSED (1 iter)</td><td class="duration">6520ms</td></tr><tr><td class="step-name">execute-api</td><td><span class="status-icon done">✓</span> PASSED (1 iter)</td><td class="duration">6520ms</td></tr><tr><td class="step-name">execute-security</td><td><span class="status-icon done">✓</span> PASSED (1 iter)</td><td class="duration">6520ms</td></tr><tr><td class="step-name">execute-contract</td><td><span class="status-icon done">✓</span> PASSED (1 iter)</td><td class="duration">6520ms</td></tr><tr><td class="step-name">flaky-detector</td><td><span class="status-icon done">✓</span> DONE</td><td class="duration">19560ms</td></tr><tr><td class="step-name">coverage-reporter</td><td><span class="status-icon done">✓</span> DONE</td><td class="duration">300ms</td></tr></tbody>
+  </table>
+</section>
+
+<section class="section">
+  <div class="modules-header">
+    <h2>מודולים</h2>
+    <div class="filters">
+      <button class="filter-btn active" onclick="filterModules(this,'all')">הכל</button>
+      <button class="filter-btn" onclick="filterModules(this,'covered')">כוסה</button>
+      <button class="filter-btn" onclick="filterModules(this,'unchanged')">לא שונה</button>
+      <input class="search-box" type="search" placeholder="חיפוש..." oninput="searchModules(this.value)">
+    </div>
+  </div>
+  <table class="module-table" id="module-table">
+    <thead><tr><th>מודול</th><th>שפה</th><th>סטטוס</th><th>בדיקות</th><th>פערים</th><th>Blind Spots</th></tr></thead>
+    <tbody><tr data-status="covered" data-has-blindspots="false"><td class="module-path">src/auth.py</td><td><span class="lang-badge">py</span></td><td><span class="status-badge covered">covered</span></td><td><a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/QA-Skills/test/fixtures/python-fastapi/tests/unit/src/test_auth.py">test_auth.py</a>, <a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/QA-Skills/test/fixtures/python-fastapi/tests/api/test_auth_api.py">test_auth_api.py</a>, <a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/QA-Skills/test/fixtures/python-fastapi/tests/security/test_auth_security.py">test_auth_security.py</a>, <a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/QA-Skills/test/fixtures/python-fastapi/tests/contract/test_api_contract.py">test_api_contract.py</a></td><td>—</td><td>—</td></tr><tr data-status="covered" data-has-blindspots="false"><td class="module-path">src/users.py</td><td><span class="lang-badge">py</span></td><td><span class="status-badge covered">covered</span></td><td><a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/QA-Skills/test/fixtures/python-fastapi/tests/unit/src/test_users.py">test_users.py</a>, <a class="test-link" href="file:///Users/bechorsimhaev/Desktop/code/QA-Skills/test/fixtures/python-fastapi/tests/api/test_users_api.py">test_users_api.py</a></td><td>—</td><td>—</td></tr><tr data-status="unchanged" data-has-blindspots="false"><td class="module-path">main.py</td><td><span class="lang-badge">py</span></td><td><span class="status-badge unchanged">unchanged</span></td><td>—</td><td><details><summary>1 gap(s)</summary><ul><li>Entry point — no business logic</li></ul></details></td><td>—</td></tr><tr data-status="unchanged" data-has-blindspots="false"><td class="module-path">src/__init__.py</td><td><span class="lang-badge">py</span></td><td><span class="status-badge unchanged">unchanged</span></td><td>—</td><td><details><summary>1 gap(s)</summary><ul><li>Empty file</li></ul></details></td><td>—</td></tr></tbody>
+  </table>
+</section>
+
+<section class="section">
+  <h2>פערי כיסוי</h2>
+  <div class="gap-group"><h3>🟢 Low Priority</h3><div class="gap-card low"><span class="gap-module">main.py</span><p>App entry point — no logic to test</p></div><div class="gap-card low"><span class="gap-module">src/__init__.py</span><p>Empty init file</p></div></div>
+</section>
+
+<footer>
+  <div class="footer-links">
+    <a href="file:///Users/bechorsimhaev/Desktop/code/QA-Skills/test/fixtures/python-fastapi/test-state.json">test-state.json</a>
+    <a href="file:///Users/bechorsimhaev/Desktop/code/QA-Skills/test/fixtures/python-fastapi/test-reports/report-data.json">report-data.json</a>
+  </div>
+  <p>Generated by qa-skills • 2026-04-30T07:44:11.153162+00:00</p>
+</footer>
+
+<script>
+function filterModules(btn, filter) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('#module-table tbody tr').forEach(row => {
+    row.style.display = (filter === 'all' || row.dataset.status === filter) ? '' : 'none';
+  });
+}
+function searchModules(query) {
+  const q = query.toLowerCase();
+  document.querySelectorAll('#module-table tbody tr').forEach(row => {
+    const path = row.querySelector('.module-path')?.textContent?.toLowerCase() || '';
+    row.style.display = path.includes(q) ? '' : 'none';
+  });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('details').forEach(d => d.removeAttribute('open'));
+});
+</script>
+</body>
+</html>
