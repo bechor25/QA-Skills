@@ -11,6 +11,13 @@ claude plugin marketplace add bechor25/QA-Skills
 claude plugin install qa-skills
 ```
 
+**Upgrade:**
+```bash
+claude plugin uninstall qa-skills
+claude plugin marketplace remove qa-skills
+claude plugin marketplace add bechor25/QA-Skills
+claude plugin install qa-skills
+```
 **Use** — open Claude Code in any project and type:
 ```
 generate tests for my project
