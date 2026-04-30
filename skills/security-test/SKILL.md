@@ -448,6 +448,7 @@ Max 3 fix iterations. Mark `status: "partial"` if still failing after app-side f
     "source_module": "src/auth/login.ts",
     "path": "tests/security/auth.security.test.py",
     "tests_written": 11,
+    "assertions_covered": ["jwt:alg_none_rejected", "jwt:tampered_payload", "sql_injection:login_email", "idor:update_other_user"],
     "categories_covered": ["auth", "idor", "timing", "privilege-escalation"],
     "vulnerabilities_found": [],
     "status": "created | updated | partial",
@@ -455,6 +456,10 @@ Max 3 fix iterations. Mark `status: "partial"` if still failing after app-side f
   }
 ]
 ```
+
+`assertions_covered` is the canonical field used by the orchestrator for deduplication.
+Format: `"{category}:{test_scenario}"`. Include one entry per test case generated.
+`categories_covered` is kept for backward compatibility.
 
 Note: `vulnerabilities_found` is populated only if tests detect actual vulnerabilities
 during generation (e.g., if code-analyzer warnings indicate a clear pattern).

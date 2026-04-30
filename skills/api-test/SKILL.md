@@ -375,9 +375,14 @@ Max 3 fix iterations. Mark `status: "partial"` if still failing.
     "source_module": "src/routes/auth.ts",
     "path": "tests/api/auth.api.test.ts",
     "tests_written": 14,
+    "assertions_covered": ["POST /auth/login:happy_path", "POST /auth/login:missing_password", "GET /auth/me:no_token"],
     "endpoints_covered": ["POST /auth/login", "POST /auth/refresh", "POST /auth/logout"],
     "status": "created | updated | partial",
     "execution_result": "passed | failed | not_run"
   }
 ]
 ```
+
+`assertions_covered` is the canonical field used by the orchestrator for deduplication.
+Format: `"{METHOD} {path}:{scenario}"`. Include one entry per test case generated.
+`endpoints_covered` is kept for backward compatibility.

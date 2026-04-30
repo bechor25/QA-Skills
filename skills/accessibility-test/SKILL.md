@@ -289,6 +289,7 @@ Max 3 fix iterations.
     "source_module": "src/components/LoginForm.tsx",
     "path": "tests/a11y/auth.a11y.spec.ts",
     "tests_written": 8,
+    "assertions_covered": ["/login:color_contrast", "/login:keyboard_nav", "/login:aria_labels", "/register:form_labels"],
     "pages_covered": ["/login", "/register"],
     "a11y_issues": [],
     "status": "created | updated | partial",
@@ -296,6 +297,10 @@ Max 3 fix iterations.
   }
 ]
 ```
+
+`assertions_covered` is the canonical field used by the orchestrator for deduplication.
+Format: `"{page}:{check_type}"`. Include one entry per test case generated.
+`pages_covered` is kept for backward compatibility.
 
 `a11y_issues` is populated with real violations found during test execution, not just test failures.
 Coverage reporter adds `a11y` gauge and `critical_violations` field to `coverage_by_category.a11y`.

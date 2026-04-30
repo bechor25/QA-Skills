@@ -4,6 +4,26 @@
 
 ## English
 
+### Installation
+
+```bash
+claude plugin marketplace add bechor25/QA-Skills
+claude plugin install qa-skills
+```
+
+Restart Claude Code after installing.
+
+To update:
+```bash
+claude plugin marketplace update bechor25/QA-Skills
+claude plugin update qa-skills
+```
+
+To uninstall:
+```bash
+claude plugin uninstall qa-skills
+```
+
 ### What this is
 
 A set of Claude Code skills that automatically generate, run, and report on tests for any codebase.
@@ -146,6 +166,26 @@ your-project/
 ---
 
 ## עברית
+
+### התקנה
+
+```bash
+claude plugin marketplace add bechor25/QA-Skills
+claude plugin install qa-skills
+```
+
+הפעל מחדש את Claude Code אחרי ההתקנה.
+
+עדכון:
+```bash
+claude plugin marketplace update bechor25/QA-Skills
+claude plugin update qa-skills
+```
+
+הסרה:
+```bash
+claude plugin uninstall qa-skills
+```
 
 ### מה זה
 

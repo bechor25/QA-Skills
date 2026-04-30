@@ -7,7 +7,8 @@ Designed for manual QA testers — no coding required.
 
 **Install:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bechorsimhaev/QA-Skills/main/install.sh | bash
+claude plugin marketplace add bechor25/QA-Skills
+claude plugin install qa-skills
 ```
 
 **Use** — open Claude Code in any project and type:

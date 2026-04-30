@@ -436,6 +436,7 @@ Max 3 fix iterations.
     "source_module": "src/components/LoginForm.tsx",
     "path": "tests/e2e/auth-login.spec.ts",
     "tests_written": 8,
+    "assertions_covered": ["login:happy_path", "login:invalid_credentials", "logout:clears_session", "session-expiry:redirects_to_login"],
     "flows_covered": ["login", "logout", "session-expiry"],
     "accessibility_checks": true,
     "status": "created | updated | partial",
@@ -443,3 +444,7 @@ Max 3 fix iterations.
   }
 ]
 ```
+
+`assertions_covered` is the canonical field used by the orchestrator for deduplication.
+Format: `"{flow}:{scenario}"`. Include one entry per test case generated.
+`flows_covered` is kept for backward compatibility.

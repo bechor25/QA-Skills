@@ -340,9 +340,14 @@ Max 3 fix iterations. If still failing after 3, mark `status: "partial"` and doc
     "source_module": "src/auth/login.ts",
     "path": "tests/unit/auth/login.test.ts",
     "tests_written": 12,
+    "assertions_covered": ["loginUser:happy_path", "loginUser:invalid_email", "validateToken:expired"],
     "functions_covered": ["loginUser", "validateToken"],
     "status": "created | updated | partial",
     "execution_result": "passed | failed | not_run"
   }
 ]
 ```
+
+`assertions_covered` is the canonical field used by the orchestrator for deduplication.
+Format: `"{function_name}:{scenario}"`. Include one entry per test case generated.
+`functions_covered` is kept for backward compatibility.
