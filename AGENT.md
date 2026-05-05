@@ -1,6 +1,6 @@
 # QA Skills — מדריך לבודק
 
-This project contains a set of QA skills for Claude Code that automatically generate, run, and report on tests for any codebase. Designed for manual QA testers — no coding required.
+This project contains a set of QA skills + agents for Claude Code that automatically generate, run, and report on tests for any codebase. Designed for manual QA testers — no coding required.
 
 ## How to use / איך להשתמש
 
@@ -42,49 +42,90 @@ Type any of the phrases below. Claude will ask for the project path and handle e
 
 ## What Claude does automatically / מה קלוד עושה אוטומטית
 
-1. **Validates environment** — checks toolchain, test framework, server availability
-2. **Analyzes changes** — uses git diff to skip tests for trivial changes
-3. **Scans the project** — identifies all modules, routes, integrations, state machines
-4. **Generates tests** in parallel: unit, API, UI, security, accessibility, contract
-5. **Runs and fixes** any failures (up to 3 attempts per category)
-6. **Detects flaky tests** — re-runs 3× and reports unstable tests with cause + fix hint
-7. **Computes Quality Score** (0–100) — weighted coverage minus flaky/gap penalties
-8. **Produces HTML report** — opens in browser with filters, blind spots, recommendations
+The trigger skill invokes `qa-orchestrator` agent in an isolated context. The orchestrator runs the full flow:
 
-You only need to provide the project path. Everything else is automatic.
-If the environment is missing something (no jest, server not running), you get a plain-language message — no code to fix.
+1. **Setup** — creates checkpoint and log directories.
+2. **Scan** — `qa-code-analyzer` agent maps modules, routes, integrations.
+3. **Diff classification** — `qa-git-diff-analyzer` skips trivial changes.
+4. **Environment check** — `qa-env-validator` verifies toolchain. Categories with missing prerequisites are dropped.
+5. **State diff** — only changed/new modules are tested (incremental run).
+6. **Strategy phase** — execution plan built and displayed; auto-proceeds by default.
+7. **Generate** — test-generation agents run in parallel (each in its own isolated context):
+   - `qa-unit-test`, `qa-api-test`, `qa-ui-test`, `qa-security-test`, `qa-a11y-test`, `qa-contract-test`.
+   - Each agent runs and fixes its own tests; only small JSON returns to the orchestrator.
+8. **Flaky detection** — `qa-flaky-detector` re-runs the suite 3× to catch unstable tests.
+9. **Quality score** — weighted coverage minus flaky/gap penalties.
+10. **Report** — `qa-coverage-reporter` builds `report-data.json`, then `qa-html-reporter` renders the HTML and opens it in the browser.
 
-## Skills in this system
+You only provide the project path. Everything else is automatic.
 
-| Skill | Role | Standalone? |
-|-------|------|-------------|
-| `test-orchestrator` | Main entry point — coordinates everything | ✅ |
-| `unit-test` | Unit tests (functions, classes, TZ, float precision) | ✅ |
-| `api-test` | API/HTTP tests incl. auth matrix, concurrency | ✅ |
-| `ui-playwright` | E2E browser tests, RTL, session, multi-tab | ✅ |
-| `security-test` | OWASP Top 10 + JWT confusion + SSRF + redirect | ✅ |
-| `accessibility-test` | WCAG 2.1 AA — axe-core, focus, headings, RTL | ✅ |
-| `contract-test` | OpenAPI schema conformance or golden-master drift | ✅ |
-| `flaky-detector` | Re-runs suite 3×, reports non-deterministic tests | internal |
-| `env-validator` | Checks toolchain, framework, server, DB, disk | internal |
-| `git-diff-analyzer` | Classifies changes (trivial/body/signature) | internal |
-| `code-analyzer` | Scans codebase — routes, integrations, state machines | internal |
-| `coverage-reporter` | Aggregates results + quality score | internal |
-| `html-reporter` | Self-contained HTML report (no server needed) | internal |
+If the environment is missing something (no playwright, server not running), you get a plain-language message — no code to fix. UI tests skip immediately when no dev server is reachable; they never enter a runaway loop.
 
-## QA Skills directory structure
+## Skills (trigger phrases) and Agents (workers)
+
+### Skills
+
+| Skill | Trigger context | Agent it invokes |
+|-------|-----------------|------------------|
+| `test-orchestrator` | Main entry — full flow | `qa-orchestrator` |
+| `unit-test` | Unit tests | `qa-unit-test` |
+| `api-test` | API tests | `qa-api-test` |
+| `ui-playwright` | UI / E2E tests | `qa-ui-test` |
+| `security-test` | Security tests | `qa-security-test` |
+| `accessibility-test` | WCAG | `qa-a11y-test` |
+| `contract-test` | Schema / golden masters | `qa-contract-test` |
+| `flaky-detector` | Re-run analysis | `qa-flaky-detector` |
+| `env-validator` | Environment check | `qa-env-validator` |
+| `git-diff-analyzer` | Diff classification | `qa-git-diff-analyzer` |
+| `code-analyzer` | Codebase scan | `qa-code-analyzer` |
+| `coverage-reporter` | Aggregation + score | `qa-coverage-reporter` |
+| `html-reporter` | HTML rendering | `qa-html-reporter` |
+
+### Agents
+
+| Agent | Model | Why this model |
+|-------|-------|----------------|
+| `qa-orchestrator` | sonnet | Coordination, no heavy generation |
+| `qa-code-analyzer` | haiku | Pattern scanning, structured JSON output |
+| `qa-env-validator` | haiku | Tool checks |
+| `qa-git-diff-analyzer` | haiku | Diff parsing |
+| `qa-unit-test` | sonnet | Code generation |
+| `qa-api-test` | sonnet | Code generation |
+| `qa-ui-test` | opus | DOM reasoning, smoke-first logic, fix loops |
+| `qa-security-test` | opus | OWASP reasoning |
+| `qa-a11y-test` | sonnet | axe-core integration |
+| `qa-contract-test` | sonnet | Schema matching |
+| `qa-flaky-detector` | haiku | Re-runs + diff |
+| `qa-coverage-reporter` | haiku | JSON aggregation |
+| `qa-html-reporter` | haiku | Template rendering |
+
+## Configuration overrides
+
+Environment variables read by the orchestrator at start:
+
+| Variable | Effect |
+|----------|--------|
+| `QA_SKILLS_DEFAULT_MODEL` | Override every agent's model |
+| `QA_SKILLS_<NAME>_MODEL` | Per-agent override (e.g., `QA_SKILLS_UI_MODEL=sonnet`) |
+| `QA_SKILLS_INTERACTIVE=1` | Pause Strategy phase for confirmation |
+| `QA_SKILLS_GLOBAL_TOKEN_CAP` | Override 200000 default |
+| `QA_SKILLS_AGENT_TOKEN_CAP` | Override 80000 default |
+
+CLI flags in user message:
+- `--interactive` — pause at strategy phase.
+- `--force-full` — ignore state, regenerate all.
+- `--categories=unit,api` — restrict categories.
+- `--update-snapshots` — enable visual regression for UI agent.
+
+## Directory structure
 
 ```
 qa-skills/
 ├── .claude-plugin/
 │   ├── plugin.json
 │   └── marketplace.json
-├── skills/
+├── skills/                          ← thin trigger entry points
 │   ├── _shared/
-│   │   ├── schemas/              ← JSON schemas for all data structures
-│   │   ├── messages/he.json      ← Hebrew user messages
-│   │   ├── messages/en.json      ← English user messages
-│   │   └── validate.py           ← validation + message helper
 │   ├── test-orchestrator/SKILL.md
 │   ├── unit-test/SKILL.md
 │   ├── api-test/SKILL.md
@@ -98,14 +139,38 @@ qa-skills/
 │   ├── code-analyzer/SKILL.md
 │   ├── coverage-reporter/SKILL.md
 │   └── html-reporter/SKILL.md
+├── agents/                          ← isolated subagent workers
+│   ├── qa-orchestrator.md
+│   ├── qa-code-analyzer.md
+│   ├── qa-env-validator.md
+│   ├── qa-git-diff-analyzer.md
+│   ├── qa-unit-test.md
+│   ├── qa-api-test.md
+│   ├── qa-ui-test.md
+│   ├── qa-security-test.md
+│   ├── qa-a11y-test.md
+│   ├── qa-contract-test.md
+│   ├── qa-flaky-detector.md
+│   ├── qa-coverage-reporter.md
+│   └── qa-html-reporter.md
+├── reference/                       ← code patterns loaded on demand
+│   ├── ui-test-patterns.md
+│   ├── unit-test-patterns.md
+│   ├── api-test-patterns.md
+│   ├── security-test-patterns.md
+│   ├── a11y-test-patterns.md
+│   ├── contract-test-patterns.md
+│   ├── html-report-template.md
+│   └── messages.md
 ├── test/
-│   ├── fixtures/                 ← sample apps for self-testing
-│   ├── validators/               ← self-test scripts
-│   └── run_all.sh                ← runs all validators
 ├── AGENT.md
+├── README.md
+├── REFACTOR_PLAN.md
 ├── USAGE.md
 └── install.sh
 ```
 
-When installed (plugin or symlinks), all skills live at `~/.claude/skills/<skill-name>/`.
-The orchestrator reads sub-skills from `~/.claude/skills/<skill-name>/SKILL.md`.
+When installed:
+- Skills → `~/.claude/skills/<name>/`
+- Agents → `~/.claude/agents/<name>.md`
+- Reference → `~/.claude/qa-skills-reference/`

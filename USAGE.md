@@ -1,5 +1,7 @@
 # QA Skills — Usage Guide
 
+> **v2 — Skills + Agents architecture.** Heavy QA work now runs in isolated subagent contexts (one per category). The main conversation stays small, even on large projects. UI tests with no dev server skip in seconds instead of looping for an hour. See [REFACTOR_PLAN.md](REFACTOR_PLAN.md) for design details. User-facing triggers and output are unchanged from v1.
+
 ---
 
 ## English
@@ -59,20 +61,16 @@ Claude will ask for the project path if you haven't provided one. That's the onl
 ### What happens automatically
 
 ```
-1. Validates environment  — checks toolchain, test framework, server, disk space
-2. Analyzes changes       — git diff to skip trivial edits (comments, whitespace)
-3. Scans codebase         — routes, integrations, GraphQL, state machines
-4. Generates tests in parallel:
-   - Unit tests        → for every function and class
-   - API tests         → for every HTTP endpoint
-   - UI tests          → for every frontend page/flow (Playwright)
-   - Security tests    → for auth, injection, XSS, IDOR, JWT confusion, SSRF
-   - Accessibility     → WCAG 2.1 AA via axe-core + keyboard navigation
-   - Contract tests    → OpenAPI conformance or golden-master drift
-5. Runs all generated tests
-6. Fixes failing tests automatically (up to 3 attempts per category)
-7. Detects flaky tests    — re-runs 3×, reports cause and fix hint
-8. Computes Quality Score (0–100) and opens HTML report in browser
+1. Validates environment    — toolchain, test framework, dev server reachability
+2. Analyzes changes         — git diff to skip trivial edits
+3. Scans codebase           — routes, integrations, GraphQL, state machines
+4. Strategy phase (auto)    — execution plan shown, auto-proceeds (use --interactive to pause)
+5. Generates tests — each category in its own isolated agent context, in parallel:
+   - Unit tests, API tests, UI tests (smoke-first batched), Security, A11y, Contract
+   - Each agent runs and fixes its own tests; only small JSON returns to the orchestrator
+6. UI agent: pre-flight server check first. No server → skipped in seconds, never loops.
+7. Detects flaky tests       — re-runs 3×, reports cause and fix hint
+8. Computes Quality Score and opens HTML report in browser
 ```
 
 If the run is interrupted, Claude will offer to resume from where it stopped (within 24 hours).
@@ -222,20 +220,17 @@ claude plugin uninstall qa-skills
 ### מה קורה אוטומטית
 
 ```
-1. בודק סביבה       — toolchain, test framework, שרת, מקום בדיסק
-2. מנתח שינויים     — git diff כדי לדלג על עריכות טריוויאליות (הערות, רווחים)
-3. סורק קוד         — routes, integrations, GraphQL, state machines
-4. מייצר בדיקות במקביל:
-   - בדיקות יחידה   ← לכל פונקציה ומחלקה
-   - בדיקות API     ← לכל endpoint HTTP
-   - בדיקות UI      ← לכל עמוד/זרימה בממשק (Playwright)
-   - בדיקות אבטחה   ← אימות, הזרקות, XSS, IDOR, JWT confusion, SSRF
-   - נגישות         ← WCAG 2.1 AA דרך axe-core + ניווט מקלדת
-   - חוזה           ← התאמה ל-OpenAPI או גילוי סטייה מ-golden master
-5. מריץ את כל הבדיקות
-6. מתקן בדיקות כושלות אוטומטית (עד 3 ניסיונות לכל קטגוריה)
-7. מגלה בדיקות flaky — מריץ שוב 3×, מדווח על סיבה ורמז לתיקון
-8. מחשב Quality Score (0–100) ופותח דוח HTML בדפדפן
+1. בודק סביבה              — toolchain, test framework, שרת פיתוח
+2. מנתח שינויים            — git diff לדלג על עריכות טריוויאליות
+3. סורק קוד                — routes, integrations, GraphQL, state machines
+4. שלב אסטרטגיה (אוטומטי) — מציג תוכנית ריצה וממשיך מיד
+   (הוסף --interactive להמתנה לאישור)
+5. מייצר בדיקות — כל קטגוריה ב-agent מבודד משלה, במקביל:
+   - יחידה, API, UI (smoke-first batched), אבטחה, נגישות, חוזה
+   - כל agent מריץ ומתקן בעצמו; רק JSON קטן חוזר ל-orchestrator
+6. UI agent: בדיקת שרת לפני כל דבר. אין שרת → דולג בשניות, לא נכנס ללולאה.
+7. מגלה בדיקות flaky        — מריץ שוב 3×, מדווח על סיבה ורמז לתיקון
+8. מחשב Quality Score ופותח דוח HTML בדפדפן
 ```
 
 אם הריצה הופסקה באמצע — קלוד יציע להמשיך מאיפה שהפסיק (בתוך 24 שעות).
