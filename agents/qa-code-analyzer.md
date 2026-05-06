@@ -122,6 +122,7 @@ input_fields: /\[FromBody\]|\[FromQuery\]|IFormFile/
 - **State machines:** enum + switch statements. Output `state_machines: [{name, states, file}]`.
 - **Frontend dev server detection:** read `package.json` scripts; detect `vite` (port 5173), `next` (3000), `webpack-dev-server` (8080). Set `frontend_dev_server` field.
 - **Backend dev server detection:** detect uvicorn, gunicorn, spring-boot, dotnet run from scripts/configs. Set `backend_dev_server`.
+- **SSR/mixed coalescing:** when `frontend_kind ∈ {ssr, mixed}` AND `frontend_dev_server` is null/empty → set `frontend_dev_server = backend_dev_server`. SSR frontend lives on the same origin as the backend; the backend port serves the rendered HTML. Without this, downstream agents (qa-ui-test, qa-a11y-test) get a null URL and skip.
 - **Frontend kind detection:** classify into `spa | ssr | mixed | none`. Set `frontend_kind`.
 
   | Signal | Conclusion |

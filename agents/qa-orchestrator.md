@@ -128,7 +128,9 @@ Invoke `qa-code-analyzer` via Task tool. Pass `RunContext`. Agent writes `analys
 
 Then invoke `qa-git-diff-analyzer`. It updates `analysis.json` in-place (adds `diff_class` per module). Returns counts.
 
-Then invoke `qa-env-validator`. Returns `categories_remaining` (e.g., dropping `contract` if no OpenAPI). Update `RunContext.categories_enabled`.
+Then invoke `qa-env-validator`. Pass `auto_install: ${input.options.auto_install ?? true}` as a top-level field (do NOT bury inside `options` — env-validator reads it as a top-level input). Returns `categories_remaining`, `categories_removed`, `installs_performed`. Update `RunContext.categories_enabled`. Carry `categories_removed` and `installs_performed` into the strategy plan so the user sees what was installed and what was skipped.
+
+When env-validator returns `categories_removed: [{name: "ui", reason: "..."}]`, propagate the reason to the final report. **Never let coverage-reporter overwrite it with `"skipped_no_server"` or any other default.**
 
 Write checkpoint(1).
 
@@ -235,10 +237,10 @@ Pass each agent: full RunContext + agent-specific slice. For `qa-ui-test`:
   "frontend_files": [...],
   "routes": [...],
   "preflight": {
-    "server_check_url": "${analysis.frontend_dev_server || analysis.backend_dev_server || 'http://localhost:3000'}",
+    "server_check_url": "<resolved at runtime — see below>",
     "abort_if_no_server": true,
     "smoke_first": true,
-    "marker": ${derive_marker(analysis)}
+    "marker": "<derive_marker(analysis)>"
   },
   "options": { "headless": true, "screenshots": "only-on-failure", "trace": "on-first-retry", "video": "retain-on-failure", ... }
 }
@@ -248,6 +250,23 @@ Pass each agent: full RunContext + agent-specific slice. For `qa-ui-test`:
 - If `analysis.routes` contains `/openapi.json` → `{type: "path", value: "/openapi.json"}` (FastAPI fingerprint).
 - Else if `package.json` exists with a known framework → `{type: "title_regex", value: <project_name_regex>}`.
 - Else → `null` (warning, but allowed).
+
+## server_check_url resolution (runtime)
+
+Resolve in this order. First non-empty wins:
+
+```python
+url = (
+    analysis.get("frontend_dev_server")
+    or analysis.get("backend_dev_server")
+    or {"spa": "http://localhost:3000", "ssr": "http://localhost:8000", "mixed": "http://localhost:3000", "none": None}.get(analysis.get("frontend_kind"))
+)
+if not url:
+    # do NOT dispatch qa-ui-test; record categories_skipped: [{name: "ui", reason: "no_server_url_resolved"}]
+    skip_ui = True
+```
+
+Never pass `null` or string `"None"` to qa-ui-test. If resolution fails → skip UI with explicit reason and surface to user, do not let qa-ui-test discover this via curl-fail.
 
 ## Failure isolation
 
@@ -318,6 +337,8 @@ Write checkpoint(7).
 Invoke `qa-coverage-reporter` via Task. Pass:
 - analysis path
 - all_test_outputs
+- `env_categories_removed` (from env-validator return)
+- `env_installs_performed` (from env-validator return)
 - new state
 - run_type (full/incremental)
 - flaky_tests

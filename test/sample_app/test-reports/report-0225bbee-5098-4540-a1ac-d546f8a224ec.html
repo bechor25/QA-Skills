@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QA-Skills Report — Sample QA App — 2026-05-06</title>
+  <style>
+    :root {
+      --green:  #22c55e;
+      --yellow: #f59e0b;
+      --red:    #ef4444;
+      --blue:   #3b82f6;
+      --gray:   #6b7280;
+      --bg:     #f9fafb;
+      --card:   #ffffff;
+      --border: #e5e7eb;
+      --text:   #111827;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 2rem;
+      direction: rtl;
+    }
+    h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; color: #374151; }
+    .meta { color: var(--gray); font-size: 0.85rem; margin-bottom: 2rem; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 1.2rem 1.4rem; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .card .label { font-size: 0.78rem; color: var(--gray); text-transform: uppercase; letter-spacing: .04em; }
+    .card .value { font-size: 2rem; font-weight: 700; line-height: 1.1; margin-top: .2rem; }
+    .card .value.green  { color: var(--green); }
+    .card .value.yellow { color: var(--yellow); }
+    .card .value.red    { color: var(--red); }
+    .card .value.blue   { color: var(--blue); }
+    .score-ring {
+      display: flex; align-items: center; gap: 1.5rem;
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 1.5rem 2rem; margin-bottom: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .score-ring svg { flex-shrink: 0; }
+    .score-ring .score-num { font-size: 2.5rem; font-weight: 800; color: var(--yellow); }
+    .score-ring .score-label { font-size: 0.9rem; color: var(--gray); }
+    .section { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 1.4rem 1.6rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    th { text-align: right; padding: .6rem .8rem; border-bottom: 2px solid var(--border);
+      color: var(--gray); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; }
+    td { padding: .55rem .8rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block; padding: .2rem .6rem; border-radius: 999px;
+      font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+    }
+    .badge-passed   { background: #dcfce7; color: #15803d; }
+    .badge-skipped  { background: #f3f4f6; color: #6b7280; }
+    .badge-error    { background: #fee2e2; color: #b91c1c; }
+    .badge-high     { background: #fee2e2; color: #b91c1c; }
+    .badge-medium   { background: #fef3c7; color: #b45309; }
+    .badge-low      { background: #f3f4f6; color: #6b7280; }
+    .progress-bar { height: 8px; background: var(--border); border-radius: 999px; overflow: hidden; }
+    .progress-bar .fill { height: 100%; border-radius: 999px; background: var(--green); }
+    .install-list { font-size: 0.83rem; color: var(--gray); margin-top: 0.3rem; }
+    .install-list span { background: #eff6ff; color: #1d4ed8; padding: .1rem .4rem; border-radius: 4px; margin-right: .3rem; font-family: monospace; }
+    footer { text-align: center; color: var(--gray); font-size: 0.78rem; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+
+<h1>QA-Skills — דוח ריצה</h1>
+<p class="meta">
+  פרויקט: <strong>Sample QA App</strong> (FastAPI / Python) &nbsp;|&nbsp;
+  Run ID: <code>0225bbee-5098-4540-a1ac-d546f8a224ec</code> &nbsp;|&nbsp;
+  תאריך: 2026-05-06 &nbsp;|&nbsp;
+  סוג ריצה: <strong>מלאה</strong>
+</p>
+
+<!-- Score Ring -->
+<div class="score-ring">
+  <svg width="90" height="90" viewBox="0 0 90 90">
+    <circle cx="45" cy="45" r="38" fill="none" stroke="#e5e7eb" stroke-width="10"/>
+    <circle cx="45" cy="45" r="38" fill="none" stroke="#f59e0b" stroke-width="10"
+      stroke-dasharray="238.76" stroke-dashoffset="86" stroke-linecap="round"
+      transform="rotate(-90 45 45)"/>
+    <text x="45" y="52" text-anchor="middle" font-size="20" font-weight="800" fill="#f59e0b">64</text>
+  </svg>
+  <div>
+    <div class="score-num">64<span style="font-size:1.2rem;color:var(--gray)">/100</span></div>
+    <div class="score-label">ציון איכות כולל</div>
+    <div style="margin-top:.4rem;font-size:.83rem;color:var(--gray)">
+      161 בדיקות חדשות &nbsp;|&nbsp; 0 לא יציבות &nbsp;|&nbsp; 99% כיסוי קוד
+    </div>
+  </div>
+</div>
+
+<!-- Summary Cards -->
+<div class="cards">
+  <div class="card">
+    <div class="label">מודולים</div>
+    <div class="value blue">5</div>
+    <div style="font-size:.78rem;color:var(--gray);margin-top:.2rem">5 השתנו</div>
+  </div>
+  <div class="card">
+    <div class="label">בדיקות חדשות</div>
+    <div class="value green">161</div>
+  </div>
+  <div class="card">
+    <div class="label">עודכנו</div>
+    <div class="value blue">0</div>
+  </div>
+  <div class="card">
+    <div class="label">לא יציבות</div>
+    <div class="value green">0</div>
+  </div>
+  <div class="card">
+    <div class="label">כיסוי קוד</div>
+    <div class="value green">99%</div>
+  </div>
+  <div class="card">
+    <div class="label">פערים גבוהים</div>
+    <div class="value yellow">1</div>
+  </div>
+</div>
+
+<!-- Categories Table -->
+<div class="section">
+  <h2>קטגוריות בדיקה</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>קטגוריה</th>
+        <th>סטטוס</th>
+        <th>בדיקות</th>
+        <th>כיסוי</th>
+        <th>קבצים</th>
+        <th>הערות</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>unit</strong></td>
+        <td><span class="badge badge-passed">passed</span></td>
+        <td>67</td>
+        <td>
+          <div class="progress-bar"><div class="fill" style="width:100%"></div></div>
+          <span style="font-size:.78rem">100%</span>
+        </td>
+        <td style="font-size:.78rem">
+          test_unit_calc.py<br>test_unit_auth.py<br>test_unit_users.py
+        </td>
+        <td style="font-size:.78rem;color:var(--gray)">calc, auth, users</td>
+      </tr>
+      <tr>
+        <td><strong>api</strong></td>
+        <td><span class="badge badge-passed">passed</span></td>
+        <td>52</td>
+        <td>
+          <div class="progress-bar"><div class="fill" style="width:100%"></div></div>
+          <span style="font-size:.78rem">100%</span>
+        </td>
+        <td style="font-size:.78rem">test_api.py</td>
+        <td style="font-size:.78rem;color:var(--gray)">כל 7 הנתיבים</td>
+      </tr>
+      <tr>
+        <td><strong>security</strong></td>
+        <td><span class="badge badge-passed">passed</span></td>
+        <td>21</td>
+        <td>
+          <div class="progress-bar"><div class="fill" style="width:100%"></div></div>
+          <span style="font-size:.78rem">100%</span>
+        </td>
+        <td style="font-size:.78rem">test_security.py</td>
+        <td style="font-size:.78rem;color:var(--gray)">JWT, הרשאות, הזרקה</td>
+      </tr>
+      <tr>
+        <td><strong>contract</strong></td>
+        <td><span class="badge badge-passed">passed</span></td>
+        <td>21</td>
+        <td>
+          <div class="progress-bar"><div class="fill" style="width:100%"></div></div>
+          <span style="font-size:.78rem">100%</span>
+        </td>
+        <td style="font-size:.78rem">test_contract.py</td>
+        <td style="font-size:.78rem;color:var(--gray)">OpenAPI schema</td>
+      </tr>
+      <tr>
+        <td><strong>ui</strong></td>
+        <td><span class="badge badge-skipped">skipped</span></td>
+        <td>0</td>
+        <td>
+          <div class="progress-bar"><div class="fill" style="width:0%"></div></div>
+          <span style="font-size:.78rem">—</span>
+        </td>
+        <td style="font-size:.78rem">—</td>
+        <td style="font-size:.78rem;color:var(--gray)">playwright לא מותקן</td>
+      </tr>
+      <tr>
+        <td><strong>a11y</strong></td>
+        <td><span class="badge badge-skipped">skipped</span></td>
+        <td>0</td>
+        <td>
+          <div class="progress-bar"><div class="fill" style="width:0%"></div></div>
+          <span style="font-size:.78rem">—</span>
+        </td>
+        <td style="font-size:.78rem">—</td>
+        <td style="font-size:.78rem;color:var(--gray)">playwright לא מותקן</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Gaps / Findings -->
+<div class="section">
+  <h2>פערים וממצאים</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>חומרה</th>
+        <th>מודול</th>
+        <th>תיאור</th>
+        <th>קטגוריה</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-high">גבוהה</span></td>
+        <td style="font-size:.83rem"><code>app/auth.py</code><br><code>verify_password</code></td>
+        <td style="font-size:.83rem">אין בדיקת None בקלט — זורק AttributeError במקום להחזיר False</td>
+        <td style="font-size:.83rem">security</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-medium">בינונית</span></td>
+        <td style="font-size:.83rem"><code>app/auth.py</code><br><code>decode_token_unsafe</code></td>
+        <td style="font-size:.83rem">פונקציה קיימת המקבלת טוקנים ללא חתימה — יש להסיר מקוד ייצור</td>
+        <td style="font-size:.83rem">security</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-medium">בינונית</span></td>
+        <td style="font-size:.83rem"><code>app/auth.py</code></td>
+        <td style="font-size:.83rem">JWT_SECRET נפול ל-'dev-secret-change-me' כשמשתנה הסביבה לא מוגדר</td>
+        <td style="font-size:.83rem">security</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-low">נמוכה</span></td>
+        <td style="font-size:.83rem"><code>app/users.py</code> שורה 69</td>
+        <td style="font-size:.83rem">UserStore.delete — נבדק רק נתיב מוצלח, חסר מקרה delete של משתמש לא קיים ב-unit tests</td>
+        <td style="font-size:.83rem">unit</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Coverage Details -->
+<div class="section">
+  <h2>כיסוי קבצים</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>קובץ</th>
+        <th>שורות</th>
+        <th>מכוסה</th>
+        <th>כיסוי</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="font-size:.83rem"><code>app/__init__.py</code></td>
+        <td>1</td>
+        <td>1</td>
+        <td><span style="color:var(--green);font-weight:600">100%</span></td>
+      </tr>
+      <tr>
+        <td style="font-size:.83rem"><code>app/auth.py</code></td>
+        <td>26</td>
+        <td>26</td>
+        <td><span style="color:var(--green);font-weight:600">100%</span></td>
+      </tr>
+      <tr>
+        <td style="font-size:.83rem"><code>app/calc.py</code></td>
+        <td>43</td>
+        <td>43</td>
+        <td><span style="color:var(--green);font-weight:600">100%</span></td>
+      </tr>
+      <tr>
+        <td style="font-size:.83rem"><code>app/main.py</code></td>
+        <td>27</td>
+        <td>27</td>
+        <td><span style="color:var(--green);font-weight:600">100%</span></td>
+      </tr>
+      <tr>
+        <td style="font-size:.83rem"><code>app/routes.py</code></td>
+        <td>80</td>
+        <td>80</td>
+        <td><span style="color:var(--green);font-weight:600">100%</span></td>
+      </tr>
+      <tr>
+        <td style="font-size:.83rem"><code>app/users.py</code></td>
+        <td>46</td>
+        <td>45</td>
+        <td><span style="color:var(--yellow);font-weight:600">98%</span></td>
+      </tr>
+      <tr style="font-weight:700;background:#f9fafb">
+        <td>סה"כ</td>
+        <td>223</td>
+        <td>222</td>
+        <td><span style="color:var(--green)">99%</span></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Test Files -->
+<div class="section">
+  <h2>קבצי בדיקה שנוצרו</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>קובץ</th>
+        <th>קטגוריה</th>
+        <th>מספר בדיקות</th>
+        <th>סטטוס</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="font-size:.83rem"><code>tests/test_unit_calc.py</code></td>
+        <td>unit</td>
+        <td>28</td>
+        <td><span class="badge badge-passed">passed</span></td>
+      </tr>
+      <tr>
+        <td style="font-size:.83rem"><code>tests/test_unit_auth.py</code></td>
+        <td>unit</td>
+        <td>19</td>
+        <td><span class="badge badge-passed">passed</span></td>
+      </tr>
+      <tr>
+        <td style="font-size:.83rem"><code>tests/test_unit_users.py</code></td>
+        <td>unit</td>
+        <td>20</td>
+        <td><span class="badge badge-passed">passed</span></td>
+      </tr>
+      <tr>
+        <td style="font-size:.83rem"><code>tests/test_api.py</code></td>
+        <td>api</td>
+        <td>52</td>
+        <td><span class="badge badge-passed">passed</span></td>
+      </tr>
+      <tr>
+        <td style="font-size:.83rem"><code>tests/test_security.py</code></td>
+        <td>security</td>
+        <td>21</td>
+        <td><span class="badge badge-passed">passed</span> <span style="font-size:.78rem;color:var(--gray)">(1 xfail מתוכנן)</span></td>
+      </tr>
+      <tr>
+        <td style="font-size:.83rem"><code>tests/test_contract.py</code></td>
+        <td>contract</td>
+        <td>21</td>
+        <td><span class="badge badge-passed">passed</span></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Environment -->
+<div class="section">
+  <h2>סביבה</h2>
+  <table>
+    <thead>
+      <tr><th>פריט</th><th>ערך</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Python</td><td>3.12.13 (.venv)</td></tr>
+      <tr><td>FastAPI</td><td>0.115.0</td></tr>
+      <tr><td>pytest</td><td>8.3.3</td></tr>
+      <tr><td>הותקן בזמן ריצה</td><td>
+        <div class="install-list"><span>pytest-asyncio==1.3.0</span></div>
+      </td></tr>
+      <tr><td>UI / a11y</td><td style="color:var(--gray)">playwright לא מותקן — נדלג</td></tr>
+      <tr><td>מודל AI</td><td>claude-sonnet-4-6</td></tr>
+      <tr><td>טוקנים (הערכה)</td><td>107,000</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<footer>
+  נוצר על ידי QA-Skills &nbsp;|&nbsp; Run ID: 0225bbee-5098-4540-a1ac-d546f8a224ec &nbsp;|&nbsp; 2026-05-06
+</footer>
+
+</body>
+</html>

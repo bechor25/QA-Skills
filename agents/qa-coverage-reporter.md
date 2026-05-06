@@ -19,6 +19,8 @@ Aggregate all test outputs, state, flaky info, and quality score into `report-da
   "project_root": "/abs/path",
   "analysis_path": "/abs/path/.qa-skills/logs/{run_id}/analysis.json",
   "all_test_outputs": [/* SkillResult arrays from each test-gen agent */],
+  "env_categories_removed": [{"name": "ui", "reason": "...", "action": "..."}],
+  "env_installs_performed": [{"name": "pytest-playwright", "exit": 0}],
   "state": {/* new test-state.json */},
   "flaky_tests": [...],
   "quality_score": 78,
@@ -77,9 +79,21 @@ Mapping:
 
 For each category:
 ```python
+# 1. did env-validator remove this category before dispatch?
+removed = next((r for r in env_categories_removed if r["name"] == cat), None)
+if removed:
+    coverage[cat] = {"pct": 0, "covered": 0, "total": <relevant_count>,
+                     "status": "skipped_missing_dep", "reason": removed["reason"],
+                     "action": removed.get("action")}
+    continue
+
+# 2. else look at the source agent's actual output
 agent_output = next((o for o in all_test_outputs if o.agent == source_agent), None)
-if agent_output is None or agent_output.status in ("skipped_no_server", "not_generated", "error"):
-    coverage[cat] = {"pct": 0, "covered": 0, "total": <relevant_count>, "status": agent_output.status if agent_output else "not_generated"}
+if agent_output is None:
+    coverage[cat] = {"pct": 0, "covered": 0, "total": <relevant_count>, "status": "not_generated"}
+    continue
+if agent_output.status in ("skipped_no_server", "skipped_wrong_server", "skipped_unsupported_language", "error"):
+    coverage[cat] = {"pct": 0, "covered": 0, "total": <relevant_count>, "status": agent_output.status, "reason": agent_output.get("reason")}
     continue
 covered = sum(1 for spec in agent_output.outputs if spec.execution_result == "passed")
 total   = len(relevant_universe)
