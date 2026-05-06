@@ -32,11 +32,16 @@ Generate working Playwright E2E tests for a frontend app. Fail fast on environme
   "routes": [...],
   "language": "typescript|javascript",
   "locale": "he|en",
+  "frontend_kind": "spa | ssr | mixed",
   "preflight": {
     "server_check_url": "http://localhost:3000",
     "abort_if_no_server": true,
     "smoke_first": true,
-    "start_server_command": null
+    "start_server_command": null,
+    "marker": {
+      "type": "title_regex | header | path",
+      "value": "MyApp|/openapi.json"
+    }
   },
   "budgets": {
     "max_tokens": 70000,
@@ -45,6 +50,10 @@ Generate working Playwright E2E tests for a frontend app. Fail fast on environme
     "max_batches": 4
   },
   "options": {
+    "headless": true,
+    "screenshots": "only-on-failure",
+    "trace": "on-first-retry",
+    "video": "retain-on-failure",
     "enable_visual_regression": false,
     "enable_multi_tab": false,
     "enable_rtl": false,
@@ -82,80 +91,191 @@ Return ONLY this JSON object. No prose, no test code, no logs.
 
 # Phase 1 — Pre-flight gate
 
-Run:
+Two checks: reachability + marker. Both must pass before any test generation.
+
+## 1a. Reachability
 ```bash
-curl -fsS -o /dev/null --max-time 5 "${SERVER_URL}"
+curl -fsS -o /tmp/qa-preflight-${run_id}.html --max-time 5 "${SERVER_URL}"
 ```
 
-Decision tree:
-- HTTP 2xx/3xx → server up → continue.
-- Curl exit non-zero or 4xx/5xx:
-  - If caller provided `start_server_command` → run it as background process, wait up to 30s for `curl` to succeed, continue if up.
-  - Else if `abort_if_no_server: true` → **return immediately**:
-    ```json
-    {
-      "agent": "qa-ui-test",
-      "status": "skipped_no_server",
-      "reason": "Server at <URL> not reachable. Start the dev server (npm start / next dev / vite) and retry.",
-      "outputs": [],
-      "batches_completed": [],
-      "batches_skipped": ["smoke", "auth_flow", "form_flow", "a11y_basic"],
-      "tokens_used_estimate": 1000,
-      "elapsed_seconds": 5
-    }
-    ```
-  - Else → return `error` with reason.
+Curl exit non-zero or 4xx/5xx:
+- If caller provided `start_server_command` → run it as background process, wait up to 30s for `curl` to succeed.
+- Else if `abort_if_no_server: true` → **return immediately** with `status: "skipped_no_server"`.
 
-# Phase 2 — Setup check
+## 1b. Marker check (fingerprints right app, prevents pointing at unrelated process on same port)
 
-Verify Playwright installed:
+If `preflight.marker` provided:
+- `type: "title_regex"` → grep `<title>` in the response body, regex-match against `value`.
+- `type: "header"` → re-curl with `-I`, check `value` header substring (e.g., `Server: uvicorn`).
+- `type: "path"` → curl `${SERVER_URL}${value}`, expect 2xx.
+
+If marker fails → return:
+```json
+{
+  "agent": "qa-ui-test",
+  "status": "skipped_wrong_server",
+  "reason": "Server at <URL> reachable but marker '${marker.value}' not found. Likely a different process is on this port (e.g., Docker, another dev server).",
+  "outputs": [],
+  "batches_skipped": ["smoke", "auth_flow", "form_flow", "a11y_basic"],
+  "tokens_used_estimate": 1000,
+  "elapsed_seconds": 5
+}
+```
+
+If `preflight.marker` is null → log warning `"no_marker_configured"` but continue. Reachability alone passes.
+
+## Skipped output schema (when reachability fails)
+```json
+{
+  "agent": "qa-ui-test",
+  "status": "skipped_no_server",
+  "reason": "Server at <URL> not reachable. Start the dev server and retry.",
+  "outputs": [],
+  "batches_completed": [],
+  "batches_skipped": ["smoke", "auth_flow", "form_flow", "a11y_basic"],
+  "tokens_used_estimate": 1000,
+  "elapsed_seconds": 5
+}
+```
+
+# Phase 2 — Setup check (language-aware)
+
+Branch on `language` input. Each branch installs the right Playwright runtime and writes the right config.
+
+## TS/JS branch (language ∈ {typescript, javascript})
+
 ```bash
 test -d "${PROJECT_ROOT}/node_modules/@playwright/test" && echo "ok" || echo "missing"
 ```
+Missing → `cd "${PROJECT_ROOT}" && npm install -D @playwright/test && npx playwright install --with-deps chromium`.
 
-If missing → install via:
-```bash
-cd "${PROJECT_ROOT}" && npm install -D @playwright/test && npx playwright install --with-deps chromium
-```
-
-Generate `playwright.config.ts` if absent (use the template in `~/.claude/qa-skills-reference/ui-test-patterns.md` or write inline minimal config with chromium-only project, headless, baseURL from preflight).
-
-# Phase 3 — Live DOM reconnaissance
-
-Write a one-shot reconnaissance script to `/tmp/qa-recon-${run_id}.ts` that visits baseURL and a handful of routes detected by code-analyzer (max 5). Capture per-page:
-
-- `title`
-- `forms`: array of `{action, inputs: [{name, id, type, ariaLabel, label_text}]}`
-- `buttons`: array of `{text, ariaLabel, role}`
-- `links`: array of `{href, text}`
-- `html_lang`, `html_dir`
-
-Run it once via `npx ts-node` or a quick `npx playwright test` wrapper. Save snapshot to `${PROJECT_ROOT}/.qa-skills/logs/${run_id}/ui-recon.json`.
-
-If reconnaissance fails (script error, timeout) → log warning, fall back to "smoke-only" mode (only batch 1 runs, then return).
-
-# Phase 4 — Smoke batch
-
-Generate exactly one spec — `${PROJECT_ROOT}/tests/e2e/smoke.spec.ts`:
-
-```typescript
-import { test, expect } from '@playwright/test';
-
-test('homepage loads with non-empty title', async ({ page }) => {
-  await page.goto('/');
-  await page.waitForLoadState('networkidle');
-  await expect(page).toHaveTitle(/.+/);
+Write `playwright.config.ts` if absent. Use `options.headless`, `options.screenshots`, `options.trace`, `options.video` from input:
+```ts
+import { defineConfig } from '@playwright/test';
+export default defineConfig({
+  testDir: './tests/e2e',
+  use: {
+    baseURL: '${SERVER_URL}',
+    headless: ${options.headless},
+    screenshot: '${options.screenshots}',
+    trace: '${options.trace}',
+    video: '${options.video}',
+  },
+  reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
+  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
 });
 ```
 
-Run:
+Tests written to `tests/e2e/*.spec.ts`.
+
+## Python branch (language == python)
+
 ```bash
-cd "${PROJECT_ROOT}" && npx playwright test tests/e2e/smoke.spec.ts --reporter=json 2>&1
+python3 -c "import pytest_playwright" 2>/dev/null && echo "ok" || echo "missing"
+```
+Missing → `pip install pytest-playwright && playwright install chromium`.
+
+Write `tests/conftest_ui.py` (do NOT clobber existing `tests/conftest.py`) with pytest-playwright fixtures and artifact config:
+```python
+import pytest
+
+@pytest.fixture(scope="session")
+def browser_context_args(browser_context_args):
+    return {**browser_context_args, "base_url": "${SERVER_URL}"}
+
+# pytest-playwright artifact CLI flags applied via pytest.ini below
 ```
 
-Parse JSON. Three outcomes:
+Append/merge into `pytest.ini` (or create) so artifacts come out automatically:
+```ini
+[pytest]
+addopts = --browser=chromium --screenshot=${options.screenshots} --video=${options.video} --tracing=${options.trace} --output=test-results
+```
+If `options.headless: false` → also add `--headed`. Default headless = no flag.
+
+Tests written to `tests/test_ui_*.py` using the `page` fixture (pytest-playwright). Do NOT use `@playwright/test` import — that is JS-only.
+
+## Java/C# branch
+
+Out of scope for v1. Return:
+```json
+{ "agent": "qa-ui-test", "status": "skipped_unsupported_language", "reason": "language=${language} not supported by qa-ui-test yet" }
+```
+
+# Phase 3 — Live DOM reconnaissance
+
+Visit baseURL and up to 5 routes from code-analyzer. Capture per-page:
+- `title`
+- `forms`: `[{action, inputs: [{name, id, type, ariaLabel, label_text}]}]`
+- `buttons`: `[{text, ariaLabel, role}]`
+- `links`: `[{href, text}]`
+- `html_lang`, `html_dir`
+
+## TS/JS recon
+Write `/tmp/qa-recon-${run_id}.ts`. Run via `npx ts-node` or a temporary `playwright test` wrapper.
+
+## Python recon
+Write `/tmp/qa-recon-${run_id}.py` using sync API:
+```python
+from playwright.sync_api import sync_playwright
+import json, sys
+ROUTES = ${json_routes}
+out = {}
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    for r in ["/"] + ROUTES[:5]:
+        page.goto("${SERVER_URL}" + r, wait_until="networkidle")
+        out[r] = {
+          "title": page.title(),
+          "forms": page.eval_on_selector_all("form", "fs => fs.map(f => ({action: f.action, inputs: [...f.querySelectorAll('input,textarea,select')].map(i => ({name:i.name,id:i.id,type:i.type,ariaLabel:i.getAttribute('aria-label'),label_text: (document.querySelector(`label[for=\"${i.id}\"]`)||{}).innerText || ''}))}))"),
+          "buttons": page.eval_on_selector_all("button", "bs => bs.map(b => ({text: b.innerText, ariaLabel: b.getAttribute('aria-label'), role: b.getAttribute('role')}))"),
+          "links": page.eval_on_selector_all("a[href]", "as => as.map(a => ({href: a.href, text: a.innerText}))"),
+          "html_lang": page.locator("html").get_attribute("lang"),
+          "html_dir":  page.locator("html").get_attribute("dir"),
+        }
+    browser.close()
+print(json.dumps(out))
+```
+Run: `python3 /tmp/qa-recon-${run_id}.py > ${PROJECT_ROOT}/.qa-skills/logs/${run_id}/ui-recon.json`.
+
+If recon fails → smoke-only mode (only batch 1 runs, then return).
+
+## SSR-aware navigation hints (when `frontend_kind == "ssr"`)
+Server-rendered apps (Jinja2, ERB, Razor, etc.) do full page reloads on form submit. In subsequent batches:
+- Use `page.wait_for_load_state("load")` (not `"networkidle"` — SSR pages are static and never reach networkidle on slow CDNs).
+- After a form submit, expect `page.url` to change OR the new page's `<title>` to differ; do NOT expect SPA-style URL change without reload.
+- Skip route-mock batch entirely (SSR has no client-side fetches to intercept by default).
+
+# Phase 4 — Smoke batch
+
+Generate exactly one spec. Wait state depends on `frontend_kind`: `"load"` for ssr, `"networkidle"` for spa.
+
+## TS/JS — `${PROJECT_ROOT}/tests/e2e/smoke.spec.ts`
+```typescript
+import { test, expect } from '@playwright/test';
+test('homepage loads with non-empty title', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForLoadState('${WAIT_STATE}');
+  await expect(page).toHaveTitle(/.+/);
+});
+```
+Run: `cd "${PROJECT_ROOT}" && npx playwright test tests/e2e/smoke.spec.ts --reporter=json 2>&1`.
+
+## Python — `${PROJECT_ROOT}/tests/test_ui_smoke.py`
+```python
+from playwright.sync_api import Page, expect
+
+def test_homepage_loads_with_non_empty_title(page: Page):
+    page.goto("/")
+    page.wait_for_load_state("${WAIT_STATE}")
+    expect(page).to_have_title(__import__("re").compile(r".+"))
+```
+Run: `cd "${PROJECT_ROOT}" && pytest tests/test_ui_smoke.py -q --json-report --json-report-file=/tmp/qa-ui-smoke-${run_id}.json 2>&1` (install `pytest-json-report` if missing, or fall back to parsing `pytest -q` stdout).
+
+Parse results. Three outcomes:
 - **Pass** → mark `smoke` complete; continue to Phase 5.
-- **Fail** → diagnose ONCE (read failing message, fix obvious issue: wrong baseURL in config, page.goto path). Re-run. Still fails → return `partial` with `outputs: [smoke spec record]` and `batches_skipped: [auth_flow, form_flow, a11y_basic]`. **Stop. Do not generate more batches.**
+- **Fail** → diagnose ONCE (wrong baseURL, wrong path, missing fixture). Re-run. Still fails → return `partial` with the smoke spec record and `batches_skipped: [auth_flow, form_flow, a11y_basic]`. **Stop.**
 
 # Phase 5 — Subsequent batches
 
@@ -215,11 +335,13 @@ Caller passes `locale`. When you write internal log lines (only useful if caller
 | Situation | Action |
 |-----------|--------|
 | Server down at start | Return `skipped_no_server` immediately |
+| Server reachable but marker mismatch | Return `skipped_wrong_server` immediately |
 | Server up but recon fails | Smoke-only mode, return partial after smoke |
 | Smoke fails after 1 retry | Return partial, skip all batches |
 | Batch 0/N pass after fix loop | Skip remaining batches, return partial |
 | Token budget exceeded | Return partial with `warnings: ["budget_exceeded"]` |
 | Playwright install fails | Return error with reason |
+| Unsupported language | Return `skipped_unsupported_language` |
 | Caller cancellation (timeout) | Return whatever is complete as partial |
 
 # What NOT to do
@@ -230,7 +352,7 @@ Caller passes `locale`. When you write internal log lines (only useful if caller
 - Do not write visual regression baselines without explicit opt-in.
 - Do not use regex selectors when reconnaissance gave you concrete labels.
 - Do not echo any test code in the return JSON.
-- Do not write to disk outside `${PROJECT_ROOT}/tests/e2e/`, `${PROJECT_ROOT}/.qa-skills/`, and `/tmp/qa-recon-*`.
+- Do not write to disk outside `${PROJECT_ROOT}/tests/e2e/` (TS/JS), `${PROJECT_ROOT}/tests/test_ui_*.py` + `${PROJECT_ROOT}/tests/conftest_ui.py` + `${PROJECT_ROOT}/pytest.ini` (Python), `${PROJECT_ROOT}/.qa-skills/`, `${PROJECT_ROOT}/playwright-report/`, `${PROJECT_ROOT}/test-results/`, and `/tmp/qa-recon-*` / `/tmp/qa-preflight-*` / `/tmp/qa-ui-smoke-*`.
 
 # Reference files
 

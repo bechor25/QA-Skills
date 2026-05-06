@@ -69,8 +69,20 @@ If `fail` → status: error, return immediately. No tests can be generated.
 
 ## 3. UI prerequisites (only if `ui` or `a11y` in categories)
 
+Branch by `language`:
+
+**TS/JS:**
 - Check `node_modules/@playwright/test` exists.
-- If missing → remove `ui`, `a11y` from categories_remaining. Add action.
+- Missing → remove `ui`, `a11y`. Action: `npm install -D @playwright/test && npx playwright install chromium`.
+
+**Python:**
+- `python3 -c "import pytest_playwright"` returns 0?
+- `playwright --version` returns 0?
+- Both must pass. Either missing → remove `ui`, `a11y`. Action: `pip install pytest-playwright && playwright install chromium`.
+
+**Java/C#:** UI not supported in v1 → remove `ui`, `a11y` with reason `"unsupported_language"`.
+
+For all branches: also verify the dev server URL is configured (read `analysis.frontend_dev_server`). If missing → keep `ui` enabled but add warning `"server_url_unknown"`.
 
 ## 4. API prerequisites (only if `api` or `security` in categories)
 

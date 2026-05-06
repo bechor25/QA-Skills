@@ -1,0 +1,12 @@
+{% extends "_base.html" %}
+{% block title %}Home — {{ app_name }}{% endblock %}
+{% block content %}
+<section aria-labelledby="hero-title">
+  <h1 id="hero-title">Welcome to {{ app_name }}</h1>
+  <p>Dummy app for exercising the QA-Skills test suite end-to-end.</p>
+  <ul>
+    <li><a href="/login" data-testid="cta-login">Sign in</a></li>
+    <li><a href="/quote" data-testid="cta-quote">Get a quote</a></li>
+  </ul>
+</section>
+{% endblock %}

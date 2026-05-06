@@ -216,12 +216,34 @@ Decision matrix (only invoke if signal present AND in `categories_enabled`):
 |-----------|-------|
 | Always (modules with non-frontend type changed) | `qa-unit-test` |
 | `analysis.routes` non-empty AND controller modules changed | `qa-api-test` |
-| `analysis.stats.has_frontend` AND frontend modules changed | `qa-ui-test` |
+| `analysis.stats.has_frontend` AND frontend modules changed AND `analysis.frontend_kind ∈ {spa, ssr, mixed}` AND `ui ∈ categories_enabled` | `qa-ui-test` |
 | Module has `has_auth` OR `has_db_queries` OR non-empty `input_fields` | `qa-security-test` |
 | `a11y` enabled AND `has_frontend` | `qa-a11y-test` |
 | `contract` enabled AND routes non-empty | `qa-contract-test` |
 
-Pass each agent: full RunContext + agent-specific slice (e.g., `qa-ui-test` gets `frontend_files`, `routes`, and `preflight` config including `server_check_url` from `analysis.frontend_dev_server` or default `http://localhost:3000`).
+Do NOT skip `qa-ui-test` for SSR apps — qa-ui-test supports both. The agent itself decides patterns based on `frontend_kind`. Server-rendered apps still get real browser tests (Playwright launches Chromium and hits the live server), they just use different wait strategies. Only skip UI when env-validator removed it (e.g., pytest-playwright not installed).
+
+Pass each agent: full RunContext + agent-specific slice. For `qa-ui-test`:
+```json
+{
+  "language": "...",
+  "frontend_kind": "${analysis.frontend_kind}",
+  "frontend_files": [...],
+  "routes": [...],
+  "preflight": {
+    "server_check_url": "${analysis.frontend_dev_server || analysis.backend_dev_server || 'http://localhost:3000'}",
+    "abort_if_no_server": true,
+    "smoke_first": true,
+    "marker": ${derive_marker(analysis)}
+  },
+  "options": { "headless": true, "screenshots": "only-on-failure", "trace": "on-first-retry", "video": "retain-on-failure", ... }
+}
+```
+
+`derive_marker(analysis)`:
+- If `analysis.routes` contains `/openapi.json` → `{type: "path", value: "/openapi.json"}` (FastAPI fingerprint).
+- Else if `package.json` exists with a known framework → `{type: "title_regex", value: <project_name_regex>}`.
+- Else → `null` (warning, but allowed).
 
 ## Failure isolation
 
@@ -304,9 +326,44 @@ Write checkpoint(8).
 
 # Phase 9 — Final gate
 
-Verify all 4 contract artifacts. If any missing → re-invoke the failing step ONCE → recheck. If still missing → return `status: partial` with explicit `missing_artifacts` list.
+## 9a. Artifact existence
+Verify all 4 contract artifacts on disk. Missing → re-invoke the failing step ONCE → recheck. Still missing → return `status: partial` with explicit `missing_artifacts`.
 
-Mark checkpoint `completed: true`.
+## 9b. Per-category truthfulness
+For each category in `report-data.json.coverage_by_category`, cross-check against `all_test_outputs`:
+
+```python
+for cat, cov in report_data["coverage_by_category"].items():
+    src_agent = CATEGORY_TO_AGENT[cat]   # e.g. "ui" -> "qa-ui-test"
+    agent_out = next((o for o in all_test_outputs if o["agent"] == src_agent), None)
+    if not agent_out or agent_out["status"] in ("skipped_no_server", "skipped_wrong_server", "skipped_unsupported_language", "not_generated", "error"):
+        if cov.get("pct", 0) > 0 or cov.get("files"):
+            FAIL(f"category {cat} reports coverage but its source agent did not produce outputs")
+        continue
+    expected_paths = {o["path"] for o in agent_out["outputs"]}
+    reported_paths = set(cov.get("files", []))
+    if not reported_paths.issubset(expected_paths):
+        FAIL(f"category {cat} lists files {reported_paths - expected_paths} not produced by {src_agent}")
+```
+
+Any FAIL → return `status: partial` with `warnings: ["coverage_inflated"]` and the offending categories listed.
+
+## 9c. tests_new sum sanity
+```python
+new_total_from_categories = sum(
+    cov.get("tests_new", 0) for cov in report_data["coverage_by_category"].values()
+)
+if abs(report_data["summary"]["tests_new"] - new_total_from_categories) > 0:
+    warnings.append("tests_new_mismatch")
+```
+
+## 9d. Disk existence of every reported test file
+For every `path` in any `coverage_by_category[*].files`:
+```bash
+test -f "${PROJECT_ROOT}/${path}" || FAIL("missing on disk: ${path}")
+```
+
+Mark checkpoint `completed: true` only after 9a–9d pass clean. Otherwise `partial`.
 
 # Final summary (printed to caller)
 

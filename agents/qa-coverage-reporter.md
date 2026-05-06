@@ -62,16 +62,31 @@ For each module in `analysis.modules`:
 
 # Phase 2 — Category coverage
 
-```
-unit:     modules with type in [service, util, model, middleware]
-ui:       analysis.frontend_files
-api:      modules with type == controller
-security: modules with has_auth OR has_db_queries OR input_fields
-a11y:     analysis.frontend_files
-contract: routes
+Category coverage is computed **strictly from `all_test_outputs`** — i.e., from what each test-generation agent actually produced in this run. Never infer coverage from `analysis.frontend_files` or `analysis.routes` alone.
+
+Mapping:
+
+| Category | Source agent(s) | Relevant universe |
+|---|---|---|
+| unit     | `qa-unit-test`     | modules with type in [service, util, model, middleware] |
+| api      | `qa-api-test`      | routes (controller modules) |
+| ui       | `qa-ui-test`       | `analysis.frontend_files` (denominator only) |
+| security | `qa-security-test` | modules with has_auth OR has_db_queries OR input_fields |
+| a11y     | `qa-a11y-test`     | `analysis.frontend_files` (denominator only) |
+| contract | `qa-contract-test` | routes |
+
+For each category:
+```python
+agent_output = next((o for o in all_test_outputs if o.agent == source_agent), None)
+if agent_output is None or agent_output.status in ("skipped_no_server", "not_generated", "error"):
+    coverage[cat] = {"pct": 0, "covered": 0, "total": <relevant_count>, "status": agent_output.status if agent_output else "not_generated"}
+    continue
+covered = sum(1 for spec in agent_output.outputs if spec.execution_result == "passed")
+total   = len(relevant_universe)
+coverage[cat] = {"pct": int(covered/total*100) if total else 0, "covered": covered, "total": total, "files": [s.path for s in agent_output.outputs], "status": agent_output.status}
 ```
 
-For each: `pct = covered / relevant * 100`.
+**Hard rule:** `coverage[cat].files` MUST be a subset of `agent_output.outputs[].path`. Never list a test file in `ui` that was not produced by `qa-ui-test`. Same for every other category. Existing TestClient/HTTP-level files do NOT count toward `ui`.
 
 # Phase 3 — Gap identification
 

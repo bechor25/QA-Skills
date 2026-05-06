@@ -42,7 +42,8 @@ Return small JSON:
     "has_auth": true,
     "has_db": true,
     "has_api": true,
-    "has_frontend": true
+    "has_frontend": true,
+    "frontend_kind": "spa | ssr | mixed | none"
   },
   "tokens_used_estimate": 8000,
   "elapsed_seconds": 12
@@ -121,6 +122,18 @@ input_fields: /\[FromBody\]|\[FromQuery\]|IFormFile/
 - **State machines:** enum + switch statements. Output `state_machines: [{name, states, file}]`.
 - **Frontend dev server detection:** read `package.json` scripts; detect `vite` (port 5173), `next` (3000), `webpack-dev-server` (8080). Set `frontend_dev_server` field.
 - **Backend dev server detection:** detect uvicorn, gunicorn, spring-boot, dotnet run from scripts/configs. Set `backend_dev_server`.
+- **Frontend kind detection:** classify into `spa | ssr | mixed | none`. Set `frontend_kind`.
+
+  | Signal | Conclusion |
+  |---|---|
+  | `package.json` deps include `react`/`vue`/`svelte`/`solid`/`@angular/core` AND no server-side template files | `spa` |
+  | Server-side templates present (`templates/*.html` Jinja2/Django, `*.erb`, `*.cshtml`, `*.hbs`, `views/*.pug`) AND no SPA framework dep | `ssr` |
+  | Both an SPA framework AND server-side templates | `mixed` |
+  | Neither | `none` |
+
+  Heuristic for Jinja2 specifically: any HTML file with `{% ... %}` or `{{ ... }}` tags counts as SSR template. Check up to 5 candidate `*.html` files via Read; stop at first match.
+
+  Also output per-frontend-file `kind` field: `"spa_component" | "ssr_template" | "static_html"`.
 
 # Phase 4 — Warnings (humans miss these)
 
@@ -143,6 +156,7 @@ Write full JSON to `${analysis_path}`:
   "project_root": "/abs/path",
   "frontend_dev_server": "http://localhost:3000",
   "backend_dev_server": "http://localhost:8000",
+  "frontend_kind": "spa | ssr | mixed | none",
   "modules": [
     {
       "path": "src/auth/login.ts",
@@ -157,7 +171,7 @@ Write full JSON to `${analysis_path}`:
     }
   ],
   "routes": [{"method": "POST", "path": "/auth/login", "handler": "loginUser", "file": "...", "requires_auth": false}],
-  "frontend_files": [{"path": "src/components/LoginForm.tsx", "hash": "...", "has_forms": true}],
+  "frontend_files": [{"path": "src/components/LoginForm.tsx", "hash": "...", "kind": "spa_component | ssr_template | static_html", "has_forms": true}],
   "stats": {"total_files": 42, "by_type": {...}, "has_auth": true, "has_db": true, "has_api": true, "has_frontend": true},
   "external_integrations": [],
   "uploads": [],
