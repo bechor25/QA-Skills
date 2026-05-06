@@ -184,6 +184,7 @@ Display to user (via stdout — caller skill relays):
 - {modules_total} modules, {modules_changed} השתנו
 - ייוצרו: {categories_planned}
 - ידולג: {categories_skipped_with_reasons}
+- הותקן בזמן הריצה: {installs_performed}   # רק אם env-validator התקין משהו
 - מודלים: {model_breakdown}
 - זמן משוער: ~{minutes} דקות
 - {abort_summary}
@@ -196,11 +197,14 @@ Execution plan (auto):
 - {modules_total} modules, {modules_changed} changed
 - Will generate: {categories_planned}
 - Skipped: {categories_skipped_with_reasons}
+- Installed during run: {installs_performed}   # only if env-validator installed something
 - Models: {model_breakdown}
 - Estimated: ~{minutes} minutes
 - {abort_summary}
 - Starting...
 ```
+
+Pull `installs_performed` from env-validator return value. Empty list → omit line entirely.
 
 If `interactive: true` → use `AskUserQuestion` to confirm before proceeding. Default mode auto-proceeds.
 

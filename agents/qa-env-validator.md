@@ -20,9 +20,12 @@ Verify the project environment is ready for test generation. Check toolchains, t
   "language": "typescript|python|java|csharp",
   "categories_enabled": ["unit", "api", "ui", "security", "a11y", "contract"],
   "checkpoint_dir": "/abs/path/.qa-skills/checkpoints",
-  "locale": "he|en"
+  "locale": "he|en",
+  "auto_install": true
 }
 ```
+
+`auto_install` (default `true`): when a category prerequisite is missing, attempt the install command before removing the category. If install succeeds → keep category enabled. If install fails or `auto_install: false` → remove category and surface action to user.
 
 # Output
 
@@ -33,10 +36,12 @@ Verify the project environment is ready for test generation. Check toolchains, t
   "checks": [
     {"name": "toolchain", "status": "pass", "detail": "node v20.10.0"},
     {"name": "unit_framework", "status": "pass", "detail": "jest 29.7.0"},
-    {"name": "playwright", "status": "fail", "detail": "not installed", "action": "npm install -D @playwright/test"}
+    {"name": "playwright", "status": "pass_after_install", "detail": "installed pytest-playwright 0.5.2", "installed": true},
+    {"name": "openapi_spec", "status": "fail", "detail": "no spec found", "action": "create openapi.yaml or contracts/ dir"}
   ],
-  "categories_removed": [{"name": "ui", "reason": "playwright missing"}],
-  "categories_remaining": ["unit", "api", "security"],
+  "categories_removed": [{"name": "contract", "reason": "no openapi spec"}],
+  "categories_remaining": ["unit", "api", "ui", "security", "a11y"],
+  "installs_performed": [{"name": "pytest-playwright", "exit": 0}],
   "tokens_used_estimate": 3000,
   "elapsed_seconds": 8
 }
@@ -69,26 +74,51 @@ If `fail` → status: error, return immediately. No tests can be generated.
 
 ## 3. UI prerequisites (only if `ui` or `a11y` in categories)
 
-Branch by `language`:
+Branch by `language`. For each missing prerequisite, follow the `auto_install` flow (Phase 3a below).
 
 **TS/JS:**
-- Check `node_modules/@playwright/test` exists.
-- Missing → remove `ui`, `a11y`. Action: `npm install -D @playwright/test && npx playwright install chromium`.
+- Check: `test -d "${project_root}/node_modules/@playwright/test"`
+- Install cmd: `cd "${project_root}" && npm install -D @playwright/test && npx playwright install chromium`
 
 **Python:**
-- `python3 -c "import pytest_playwright"` returns 0?
-- `playwright --version` returns 0?
-- Both must pass. Either missing → remove `ui`, `a11y`. Action: `pip install pytest-playwright && playwright install chromium`.
+- Check: `python3 -c "import pytest_playwright" 2>/dev/null` AND `playwright --version 2>/dev/null`
+- Install cmd: `pip install pytest-playwright && playwright install chromium`
+- If a `.venv` exists in `project_root` → activate it first: `source "${project_root}/.venv/bin/activate" && pip install ...`
 
-**Java/C#:** UI not supported in v1 → remove `ui`, `a11y` with reason `"unsupported_language"`.
+**Java/C#:** UI not supported in v1 → remove `ui`, `a11y` with reason `"unsupported_language"`. No install attempt.
 
-For all branches: also verify the dev server URL is configured (read `analysis.frontend_dev_server`). If missing → keep `ui` enabled but add warning `"server_url_unknown"`.
+For all branches: also verify the dev server URL is configured (read `analysis.frontend_dev_server`). Missing → keep `ui` enabled but add warning `"server_url_unknown"`.
+
+## 3a. Auto-install flow (shared by phases 3, 4)
+
+```python
+if check_passes(): mark "pass"; continue
+if not auto_install: remove_category(); record_action(); continue
+
+# attempt install
+result = run(install_cmd, timeout=180)
+if result.exit == 0 and check_passes():
+    mark "pass_after_install"
+    record(installed=true, install_output_summary=last_line(result.stdout))
+else:
+    remove_category()
+    record_action(install_cmd, install_failed=true, error=last_lines(result.stderr, 5))
+```
+
+Output `checks[]` entry gets:
+- `status: "pass" | "pass_after_install" | "fail"`
+- `installed: true | false` (only when status == "pass_after_install")
+- `action`: only when fail (so user can retry manually)
+
+User-visible: orchestrator's strategy line will read `"ui: installed pytest-playwright on the fly"` when `pass_after_install`. Lets user know something was installed in their environment.
 
 ## 4. API prerequisites (only if `api` or `security` in categories)
 
-**TS/JS:** check `supertest` in package.json or `node_modules`. Missing → action: install.
+**TS/JS:** check `supertest` in `package.json` or `node_modules`. Install cmd: `cd "${project_root}" && npm install -D supertest`.
 
-**Python:** `pip show httpx`. Missing → action: install.
+**Python:** check `python3 -c "import httpx"`. Install cmd: `pip install httpx` (in venv if present).
+
+Both follow Phase 3a auto-install flow.
 
 ## 5. Contract prerequisites
 
@@ -115,9 +145,12 @@ If not a git repo → warn (diff analysis will fall back to full hash compare).
 # Hard rules
 
 - Never execute test files.
-- Never modify project source.
-- All checks have a 30s timeout.
-- On hard fail (toolchain missing) → return error immediately.
+- Never modify project source code (only dependency manifests via package managers).
+- All checks have a 30s timeout. Install commands have a 180s timeout.
+- On hard fail (toolchain missing) → return error immediately. Do NOT auto-install Node/Python/JDK/.NET runtimes.
+- Auto-install is **dev dependencies only** (`-D` for npm, regular pip). Never install runtimes, system packages, or browsers outside Playwright's own installer.
+- For Python projects: prefer `${project_root}/.venv/bin/pip` if venv exists. Never `pip install` into system Python without venv.
+- Surface every install attempt in `installs_performed` so user has audit trail.
 
 # Locale-aware action messages
 
