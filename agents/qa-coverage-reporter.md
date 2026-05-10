@@ -150,6 +150,176 @@ Pass through the timeline from caller. Sort by start time. Compute total elapsed
 
 Write to `${project_root}/test-reports/report-data.json`.
 
+# Phase 5.5 — Persist learnings
+
+Single source of truth for writes to `${project_root}/.qa-skills/learnings.json`. No other agent writes there.
+
+## 5.5a — Collect findings
+
+Two distinct sources. Never mix.
+
+**Vuln source (vuln_patterns)**: walk `all_test_outputs[]`. Each agent's `outputs[].vulnerabilities_found[]` array (security/api/unit/contract). Each entry → candidate `vuln_patterns` row.
+
+**Flaky source (flaky_history)**: ONLY the orchestrator-level `flaky_tests[]` input (produced by `qa-flaky-detector` in orchestrator's Phase 5). Do NOT scan agent.outputs for flaky data — flaky-detector is the single source. Each entry → candidate `flaky_history` row.
+
+Discard any `flaky_tests` field that may appear inside individual `agent_output.outputs[]` — those are per-spec metadata, not learnings rows.
+
+Source weights (set on first write, immutable):
+
+| Source agent      | source_weight |
+|-------------------|---------------|
+| qa-flaky-detector | 1.0           |
+| qa-security-test  | 0.9           |
+| qa-api-test       | 0.9           |
+| qa-unit-test      | 0.9           |
+| qa-contract-test  | 0.85          |
+| qa-a11y-test      | 0.8           |
+| qa-code-analyzer  | 0.4           |
+
+Findings without a `test_path` from a heuristic-only agent (`source_weight ≤ 0.4`) are rejected — see schema's `can_write_finding`.
+
+## 5.5b — Validate
+
+Apply `can_write_finding(f, project_root)` per `reference/learnings-schema.md`:
+
+```python
+- category in ALLOWED_CATEGORIES
+- rule in ALLOWED_RULES (string-equal, no fuzzy)
+- module_path resolves under project_root
+- module_hash is 64-char hex AND equals sha256(read(module_path))
+- line_range = [int, int], start <= end
+- test_path resolves to a real test file, "::" form
+- evidence_runs non-empty
+```
+
+For rejected entries, append:
+```jsonl
+{"ts":"<now>","action":"reject","reason":"<code>","value":"<short>","run":"<run_id>"}
+```
+to `learnings.log`. Drop the entry. Continue.
+
+## 5.5c — Dedupe + merge
+
+Compute `id = sha256(category|module_path|rule)` for each surviving vuln. For flaky: `id = sha256(test_path)`.
+
+Read existing `learnings.json` (created on first run if absent — see 5.5e). For each finding:
+
+```python
+existing = find_by_id(file.vuln_patterns, finding.id)
+if existing is None:
+    new_entry = {
+        ...finding,
+        "tier": "candidate",
+        "occurrences": 1,
+        "first_seen": now, "last_seen": now,
+        "user_status": "open",
+        "dismiss_reason": None,
+        "evidence_runs": [run_id],
+        "source_weight": SOURCE_WEIGHTS[source_agent],
+    }
+    file.vuln_patterns.append(new_entry)
+    log("add", id=new_entry.id, tier="candidate", reason=f"{source_agent}:{run_id}", evidence=finding.test_path)
+else:
+    if existing.user_status == "dismissed_intentional":
+        continue   # never re-raise
+    existing.occurrences += 1
+    existing.last_seen    = now
+    existing.line_range   = finding.line_range          # update to current
+    existing.test_path    = finding.test_path
+    existing.module_hash  = finding.module_hash
+    if run_id not in existing.evidence_runs:
+        existing.evidence_runs.append(run_id)
+    log("increment", id=existing.id, occurrences=existing.occurrences, run=run_id)
+```
+
+For flaky entries, same pattern against `file.flaky_history`. Increment `flake_count` on existing entries; append `run_id` to `runs_observed`.
+
+## 5.5d — Promotion check
+
+After merging current run, run `maybe_promote` per `reference/learnings-promotion.md`:
+
+```python
+PROMOTION_THRESHOLD = 3
+for entry in file.vuln_patterns:
+    if entry.tier == "candidate" \
+       and run_id in entry.evidence_runs \
+       and entry.occurrences >= PROMOTION_THRESHOLD:
+        entry.tier = "confirmed"
+        log("promote", id=entry.id, **{"from": "candidate", "to": "confirmed"}, trigger="3_occurrences")
+```
+
+Heuristic-only entries (`source_weight <= 0.4`) without a `test_path` cannot promote — already filtered at write time.
+
+## 5.5e — Persist + log
+
+If `${project_root}/.qa-skills/learnings.json` does not exist, create with skeleton:
+
+```json
+{
+  "version": "1.0",
+  "project_id": "<sha256(project_root)>",
+  "created_at": "<now>",
+  "last_updated": "<now>",
+  "runs_seen": 1,
+  "vuln_patterns": [],
+  "flaky_history": [],
+  "skip_history": [],
+  "category_effectiveness": {}
+}
+```
+
+Update `last_updated` to `now`. (`runs_seen` is incremented by the validator in Phase 0.5; do NOT increment here.)
+
+Update `category_effectiveness[cat]`. Category-to-agent map (matches Phase 2):
+```python
+CATEGORY_TO_AGENT = {
+    "unit":     "qa-unit-test",
+    "api":      "qa-api-test",
+    "ui":       "qa-ui-test",
+    "security": "qa-security-test",
+    "a11y":     "qa-a11y-test",
+    "contract": "qa-contract-test",
+}
+
+for cat in ALLOWED_CATEGORIES:
+    src_agent = CATEGORY_TO_AGENT[cat]
+    agent_out = next((o for o in all_test_outputs if o["agent"] == src_agent), None)
+    gen = sum(spec.get("tests_written", 0) for spec in (agent_out["outputs"] if agent_out else []))
+    kept = sum(1 for e in file["vuln_patterns"]
+               if e["category"] == cat and e.get("user_status") in {"open", "accepted"})
+    file["category_effectiveness"][cat] = {
+        "generated": gen,
+        "kept": kept,
+        "ratio": (kept / gen) if gen else 0,
+    }
+```
+
+Atomic write:
+```bash
+write ${project_root}/.qa-skills/learnings.json.tmp
+mv    ${project_root}/.qa-skills/learnings.json.tmp ${project_root}/.qa-skills/learnings.json
+```
+
+Append batched log lines to `${project_root}/.qa-skills/learnings.log` (line-buffered append, never rewritten).
+
+## 5.5f — Add to output
+
+Extend the agent's return JSON with:
+```json
+{
+  "learnings_summary": {
+    "vuln_patterns_total": 14,
+    "added_this_run": 3,
+    "incremented_this_run": 5,
+    "promoted_this_run": 1,
+    "rejected_this_run": 2,
+    "log_path": "${project_root}/.qa-skills/learnings.log"
+  }
+}
+```
+
+Never echo full `learnings.json` content in return JSON.
+
 # Phase 6 — Invoke html-reporter
 
 Use Task tool to invoke `qa-skills:qa-html-reporter` with:

@@ -85,8 +85,8 @@ Return ONLY this JSON object. No prose, no test code, no logs.
   ],
   "tokens_used_estimate": 42000,
   "elapsed_seconds": 180,
-  "artifacts_dir": "${PROJECT_ROOT}/test-results",
-  "html_report": "${PROJECT_ROOT}/playwright-report/index.html",
+  "artifacts_dir": "${PROJECT_ROOT}/tests/ui/test-results",
+  "html_report": "${PROJECT_ROOT}/tests/ui/playwright-report/index.html",
   "warnings": []
 }
 ```
@@ -151,11 +151,12 @@ test -d "${PROJECT_ROOT}/node_modules/@playwright/test" && echo "ok" || echo "mi
 ```
 Missing → `cd "${PROJECT_ROOT}" && npm install -D @playwright/test && npx playwright install --with-deps chromium`.
 
-Write `playwright.config.ts` if absent. Use `options.headless`, `options.screenshots`, `options.trace`, `options.video` from input:
+Write `playwright.config.ts` if absent. Use `options.headless`, `options.screenshots`, `options.trace`, `options.video` from input. **All artifacts live under `tests/ui/`** (no project-root pollution):
 ```ts
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/e2e',
+  outputDir: './tests/ui/test-results',
   use: {
     baseURL: '${SERVER_URL}',
     headless: ${options.headless},
@@ -163,12 +164,14 @@ export default defineConfig({
     trace: '${options.trace}',
     video: '${options.video}',
   },
-  reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
+  reporter: [['list'], ['html', { open: 'never', outputFolder: 'tests/ui/playwright-report' }]],
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
 });
 ```
 
-Tests written to `tests/e2e/*.spec.ts`.
+Tests written to `tests/e2e/*.spec.ts`. Artifacts (screenshots, traces, videos, HTML report) written to `tests/ui/test-results/` and `tests/ui/playwright-report/`.
+
+After test run, the agent records `artifacts_dir: "${PROJECT_ROOT}/tests/ui/test-results"` and `html_report: "${PROJECT_ROOT}/tests/ui/playwright-report/index.html"` in its output JSON.
 
 ## Python branch (language == python)
 
@@ -178,7 +181,7 @@ python3 -c "import pytest_html"        2>/dev/null && echo "ok" || echo "missing
 ```
 Missing → `pip install pytest-playwright pytest-html && playwright install chromium` (run via `${project_root}/.venv/bin/pip` if venv present).
 
-Write `tests/conftest_ui.py` (do NOT clobber existing `tests/conftest.py`) with pytest-playwright fixtures:
+Create `tests/ui/` directory if absent. Write `tests/ui/conftest.py` with pytest-playwright fixtures (own conftest, isolated from project's root conftest):
 ```python
 import pytest
 
@@ -187,32 +190,23 @@ def browser_context_args(browser_context_args):
     return {**browser_context_args, "base_url": "${SERVER_URL}"}
 ```
 
-Configure pytest **without clobbering existing config**. Decide where addopts live:
+**Do NOT merge addopts into pytest.ini/pyproject.toml** — that would bleed playwright flags onto unit/api/security pytest runs and pollute their output dirs. Instead, pass UI-specific flags directly on the `pytest tests/ui/ ...` command line. Other categories invoke pytest separately and won't see these flags.
 
-```python
-if (project_root/"pytest.ini").exists():
-    target = "pytest.ini[pytest].addopts"
-elif (project_root/"pyproject.toml").exists() and "[tool.pytest.ini_options]" in pyproject.read_text():
-    target = "pyproject.toml[tool.pytest.ini_options].addopts"
-else:
-    target = "pytest.ini[pytest].addopts"   # create new pytest.ini
-```
-
-Required addopts to ADD (merge with existing — never overwrite):
+Required CLI flags for every UI pytest invocation:
 ```
 --browser=chromium
 --screenshot=${options.screenshots}
 --video=${options.video}
 --tracing=${options.trace}
---output=test-results
---html=playwright-report/index.html
+--output=tests/ui/test-results
+--html=tests/ui/playwright-report/index.html
 --self-contained-html
 ```
-If `options.headless: false` → also add `--headed`. If existing `addopts` already contains a flag → skip it (idempotent merge).
+If `options.headless: false` → also add `--headed`.
 
-Tests written to `tests/test_ui_*.py` using the `page` fixture (pytest-playwright). Do NOT use `@playwright/test` import — that is JS-only.
+Tests written to `tests/ui/test_*.py` using the `page` fixture (pytest-playwright). Do NOT use `@playwright/test` import — that is JS-only. Smoke spec → `tests/ui/test_smoke.py`. Auth flow → `tests/ui/test_auth_flow.py`. Etc.
 
-After test run, the agent records `artifacts_dir: "${PROJECT_ROOT}/test-results"` and `html_report: "${PROJECT_ROOT}/playwright-report/index.html"` in its output JSON so coverage-reporter can link them in the report.
+After test run, the agent records `artifacts_dir: "${PROJECT_ROOT}/tests/ui/test-results"` and `html_report: "${PROJECT_ROOT}/tests/ui/playwright-report/index.html"` in its output JSON so coverage-reporter can link them in the report.
 
 ## Java/C# branch
 
@@ -281,7 +275,7 @@ test('homepage loads with non-empty title', async ({ page }) => {
 ```
 Run: `cd "${PROJECT_ROOT}" && npx playwright test tests/e2e/smoke.spec.ts --reporter=json 2>&1`.
 
-## Python — `${PROJECT_ROOT}/tests/test_ui_smoke.py`
+## Python — `${PROJECT_ROOT}/tests/ui/test_smoke.py`
 ```python
 from playwright.sync_api import Page, expect
 
@@ -290,7 +284,7 @@ def test_homepage_loads_with_non_empty_title(page: Page):
     page.wait_for_load_state("${WAIT_STATE}")
     expect(page).to_have_title(__import__("re").compile(r".+"))
 ```
-Run: `cd "${PROJECT_ROOT}" && pytest tests/test_ui_smoke.py -q --json-report --json-report-file=/tmp/qa-ui-smoke-${run_id}.json 2>&1` (install `pytest-json-report` if missing, or fall back to parsing `pytest -q` stdout).
+Run: `cd "${PROJECT_ROOT}" && pytest tests/ui/test_smoke.py -q --json-report --json-report-file=/tmp/qa-ui-smoke-${run_id}.json --browser=chromium --screenshot=${options.screenshots} --video=${options.video} --tracing=${options.trace} --output=tests/ui/test-results --html=tests/ui/playwright-report/index.html --self-contained-html 2>&1`. (`pytest-json-report` is installed by env-validator; smoke run can fall back to parsing `pytest -q` stdout if missing.)
 
 Parse results. Three outcomes:
 - **Pass** → mark `smoke` complete; continue to Phase 5.
@@ -371,7 +365,7 @@ Caller passes `locale`. When you write internal log lines (only useful if caller
 - Do not write visual regression baselines without explicit opt-in.
 - Do not use regex selectors when reconnaissance gave you concrete labels.
 - Do not echo any test code in the return JSON.
-- Do not write to disk outside `${PROJECT_ROOT}/tests/e2e/` (TS/JS), `${PROJECT_ROOT}/tests/test_ui_*.py` + `${PROJECT_ROOT}/tests/conftest_ui.py` + `${PROJECT_ROOT}/pytest.ini` (Python), `${PROJECT_ROOT}/.qa-skills/`, `${PROJECT_ROOT}/playwright-report/`, `${PROJECT_ROOT}/test-results/`, and `/tmp/qa-recon-*` / `/tmp/qa-preflight-*` / `/tmp/qa-ui-smoke-*`.
+- Do not write to disk outside `${PROJECT_ROOT}/tests/e2e/` (TS/JS), `${PROJECT_ROOT}/tests/ui/` (Python: tests + conftest.py + playwright-report + test-results), `${PROJECT_ROOT}/pytest.ini` or `${PROJECT_ROOT}/pyproject.toml` (Python config merge), `${PROJECT_ROOT}/playwright.config.ts` (TS config), `${PROJECT_ROOT}/.qa-skills/`, and `/tmp/qa-recon-*` / `/tmp/qa-preflight-*` / `/tmp/qa-ui-smoke-*`.
 
 # Reference files
 

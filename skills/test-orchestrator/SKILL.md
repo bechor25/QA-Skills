@@ -31,7 +31,10 @@ Thin trigger skill. All work is delegated to the `qa-skills:qa-orchestrator` age
    - `--interactive` → strategy phase pauses for confirmation (default: auto).
    - `--force-full` → ignore state, regenerate all.
    - `--categories=unit,api,...` → restrict generated categories.
-4. Invoke the `qa-skills:qa-orchestrator` agent via the Task tool with:
+4. **Emit entry banner** as plain text BEFORE invoking the orchestrator:
+   - en: `🤖 qa-skills | starting QA flow on {project_path}...`
+   - he: `🤖 qa-skills | מפעיל QA על {project_path}...`
+5. Invoke the `qa-skills:qa-orchestrator` agent via the Task tool with:
    ```json
    {
      "project_path": "<resolved>",
@@ -42,8 +45,11 @@ Thin trigger skill. All work is delegated to the `qa-skills:qa-orchestrator` age
      "interactive": <bool>
    }
    ```
-5. Display the agent's final summary to the user. Do not echo intermediate work.
-6. Open the HTML report path returned by the agent.
+6. Display the agent's final summary to the user. Do not echo intermediate work.
+7. Open the HTML report path returned by the agent.
+8. **Emit exit banner** as plain text AFTER orchestrator returns:
+   - en: `🤖 qa-skills | done | quality {score}/100 | report: {report_path}`
+   - he: `🤖 qa-skills | סיום | איכות {score}/100 | דוח: {report_path}`
 
 ## What you do NOT do here
 

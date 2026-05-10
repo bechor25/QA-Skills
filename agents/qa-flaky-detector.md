@@ -33,10 +33,13 @@ After all tests pass, re-run the suite 3 times. Identify tests with inconsistent
   "runs_completed": 3,
   "flaky_tests": [
     {
+      "test_path": "tests/api/users.api.test.ts::POST /users handles concurrent inserts",
       "path": "tests/api/users.api.test.ts",
       "test_name": "POST /users handles concurrent inserts",
       "outcomes": ["passed", "failed", "passed"],
+      "flake_count": 1,
       "pass_rate": "2/3",
+      "runs_observed": ["run_id"],
       "cause_hypothesis": "race condition or shared state between tests",
       "suggested_fix": "Use beforeEach to reset DB; avoid shared module-level state."
     }
@@ -45,6 +48,20 @@ After all tests pass, re-run the suite 3 times. Identify tests with inconsistent
   "elapsed_seconds": 240
 }
 ```
+
+## Output requirements for `flaky_tests[]`
+
+This array feeds the learnings memory (`flaky_history[]` in `learnings.json`). Every entry MUST conform to `reference/learnings-schema.md` (load only the `flaky_history` section). Specifically:
+
+- `test_path` — `path::test_name` form. Must resolve to a real test file under `${project_root}/tests/` AND a test that ran in this detector pass. No test = no entry.
+- `flake_count` — count of `failed` outcomes across the 3 runs. `1` or `2` only (3-fail = broken, not flaky; 0-fail = stable).
+- `runs_observed` — `[run_id]` (single-element list — orchestrator merges with prior runs in coverage-reporter Phase 5.5).
+- `cause_hypothesis` — free text, decorative.
+- `suggested_fix` — free text, decorative.
+
+Coverage-reporter derives `id = sha256(test_path)`, increments `flake_count` and appends to `runs_observed` if entry exists. Confidence weight `1.0` (highest of any source — empirical 3-run reproduction).
+
+Entries missing `test_path` or where the test file does not exist on disk are dropped silently by coverage-reporter validator.
 
 # Hard rules
 

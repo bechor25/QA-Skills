@@ -91,6 +91,94 @@ Build once, reuse across all Task invocations. Keep small (under 5KB). Write lar
 }
 ```
 
+# User-visible progress banners
+
+Emit a single-line banner as plain text BEFORE AND AFTER every Task invocation in Phases 1–8. These lines appear in your response text (outside tool calls) so they bubble up through the calling skill to the user. Sub-agents themselves do NOT emit banners — only the orchestrator does, since sub-agent text is captured by the Task tool and never reaches the user.
+
+## Emoji-per-agent table
+
+| Agent                    | Emoji |
+|--------------------------|-------|
+| qa-code-analyzer         | 🔍    |
+| qa-git-diff-analyzer     | 📐    |
+| qa-env-validator         | 🔬    |
+| qa-learnings-validator   | 🧠    |
+| qa-unit-test             | 🧪    |
+| qa-api-test              | 🌐    |
+| qa-ui-test               | 🖥️    |
+| qa-security-test         | 🔒    |
+| qa-a11y-test             | ♿    |
+| qa-contract-test         | 📋    |
+| qa-flaky-detector        | 🎲    |
+| qa-coverage-reporter     | 📊    |
+| qa-html-reporter         | 📄    |
+
+## Banner format
+
+**Before** (locale=en):
+```
+{emoji} {agent} | {short_action}...
+```
+
+**Before** (locale=he):
+```
+{emoji} {agent} | {short_action_he}...
+```
+
+**After** (locale=en):
+```
+{emoji} {agent} | {short_outcome} ({elapsed}s)
+```
+
+**After** (locale=he):
+```
+{emoji} {agent} | {short_outcome_he} ({elapsed} שניות)
+```
+
+**Skipped** (any locale):
+```
+{emoji} {agent} | ⏭️ skipped: {reason}
+```
+
+**Parallel batch**:
+```
+⚡ DISPATCH PARALLEL
+  {emoji} {agent_1} | {short_action}...
+  {emoji} {agent_2} | {short_action}...
+  {emoji} {agent_3} | {short_action}...
+```
+After parallel batch returns, emit each agent's "after" line in completion order.
+
+## Examples
+
+```
+🔍 qa-code-analyzer | scanning code... done (12s, 28 modules, 14 routes)
+📐 qa-git-diff-analyzer | classifying diffs... done (2s, 6 changed)
+🔬 qa-env-validator | checking deps... installed pytest-playwright (3s)
+🧠 qa-learnings-validator | loading priors... 8 confirmed, 3 candidates (1s)
+
+⚡ DISPATCH PARALLEL
+  🧪 qa-unit-test | generating unit tests...
+  🌐 qa-api-test | generating api tests...
+  🔒 qa-security-test | generating security tests...
+
+🧪 qa-unit-test | 12 tests passed (45s, sonnet)
+🌐 qa-api-test | 8 tests passed (38s, sonnet)
+🔒 qa-security-test | 4 tests passed (52s, opus)
+
+🎲 qa-flaky-detector | 3 reruns... 0 flaky (90s)
+📊 qa-coverage-reporter | aggregating... report saved (8s)
+📄 qa-html-reporter | rendering... opened in browser (3s)
+```
+
+## Rules
+
+- One banner BEFORE each Task call. One AFTER each Task call.
+- Banner is plain text in your response, NEVER inside a tool call argument.
+- Never emit banners INSIDE the JSON return value to the caller — only as conversational text.
+- Skip banner only if Task call is a no-op decided pre-emptively (e.g., env-validator removed category before dispatch — print one `⏭️ skipped` line instead).
+- Locale: derive `short_action` / `short_outcome` from caller's `locale`. Action verbs (he): `סורק`, `מתקין`, `יוצר`, `מריץ`, `מסיים`. Outcomes: `הסתיים`, `דולג`, `נכשל`.
+
 # Phase 0 — Setup
 
 Create directories. Write initial checkpoint. Detect locale from caller input. Generate `run_id` (uuid). Record `run_started_at` timestamp.
@@ -128,11 +216,49 @@ Invoke `qa-code-analyzer` via Task tool. Pass `RunContext`. Agent writes `analys
 
 Then invoke `qa-git-diff-analyzer`. It updates `analysis.json` in-place (adds `diff_class` per module). Returns counts.
 
-Then invoke `qa-env-validator`. Pass `auto_install: ${input.options.auto_install ?? true}` as a top-level field (do NOT bury inside `options` — env-validator reads it as a top-level input). Returns `categories_remaining`, `categories_removed`, `installs_performed`. Update `RunContext.categories_enabled`. Carry `categories_removed` and `installs_performed` into the strategy plan so the user sees what was installed and what was skipped.
+Then invoke `qa-env-validator`. Pass top-level fields (do NOT bury inside `options`):
+- `auto_install: ${input.options.auto_install ?? true}`
+- `python_async_detected: <bool>` — true when language=="python" AND any module/route in `analysis.modules[].handlers` is `async def` OR `analysis.warnings` includes `async_handler_detected`.
+
+Returns `categories_remaining`, `categories_removed`, `installs_performed`. Update `RunContext.categories_enabled`. Carry `categories_removed` and `installs_performed` into the strategy plan so the user sees what was installed and what was skipped.
 
 When env-validator returns `categories_removed: [{name: "ui", reason: "..."}]`, propagate the reason to the final report. **Never let coverage-reporter overwrite it with `"skipped_no_server"` or any other default.**
 
 Write checkpoint(1).
+
+# Phase 1.5 — Learnings (priors)
+
+Invoke `qa-learnings-validator` via Task. Cheap (haiku) — runs in own isolated context. Pass:
+
+```json
+{
+  "run_id": "...",
+  "project_root": "...",
+  "categories_enabled": [...],
+  "now": "<ISO-8601>"
+}
+```
+
+Returns `{priors: {security: [...], unit: [...], ...}, flaky_priors: [...], actions: {...}}`.
+
+Behavior:
+- If `status == "no_learnings"` → set `RunContext.priors = {}` (empty per category). First run on this project. Continue.
+- If `status == "error"` → set `RunContext.priors = {}` and add `warnings: ["learnings_validator_error"]`. Continue without priors. Never abort the run on learnings issues.
+- Else → store `RunContext.priors` keyed by category. Each sub-agent in Phase 3 receives only its own slice.
+
+Surface to user (only if non-empty):
+
+**Hebrew (locale=he):**
+```
+🧠 לימוד היסטורי: {confirmed_count} ממצאים מאומתים, {candidate_count} מועמדים, {dismissed_count} נדחו ע"י המשתמש.
+```
+
+**English (locale=en):**
+```
+🧠 Learnings: {confirmed_count} confirmed, {candidate_count} candidates, {dismissed_count} user-dismissed.
+```
+
+Write checkpoint(1.5).
 
 # Phase 2 — State check
 
@@ -229,7 +355,20 @@ Decision matrix (only invoke if signal present AND in `categories_enabled`):
 
 Do NOT skip `qa-ui-test` for SSR apps — qa-ui-test supports both. The agent itself decides patterns based on `frontend_kind`. Server-rendered apps still get real browser tests (Playwright launches Chromium and hits the live server), they just use different wait strategies. Only skip UI when env-validator removed it (e.g., pytest-playwright not installed).
 
-Pass each agent: full RunContext + agent-specific slice. For `qa-ui-test`:
+Pass each agent: full RunContext + agent-specific slice + the agent's priors slice. Per-agent priors mapping:
+
+| Agent | Priors slice passed |
+|---|---|
+| qa-unit-test     | `{unit:     RunContext.priors.unit}` |
+| qa-api-test      | `{api:      RunContext.priors.api}` |
+| qa-security-test | `{security: RunContext.priors.security}` |
+| qa-contract-test | `{contract: RunContext.priors.contract}` |
+| qa-ui-test       | `{ui:       RunContext.priors.ui}` |
+| qa-a11y-test     | `{a11y:     RunContext.priors.a11y}` |
+
+Each agent receives ONLY its own category. Never pass the full `priors` map. Slice is `[]` when empty — agents must handle missing/empty gracefully.
+
+For `qa-ui-test`:
 ```json
 {
   "language": "...",
@@ -388,7 +527,38 @@ For every `path` in any `coverage_by_category[*].files`:
 test -f "${PROJECT_ROOT}/${path}" || FAIL("missing on disk: ${path}")
 ```
 
-Mark checkpoint `completed: true` only after 9a–9d pass clean. Otherwise `partial`.
+## 9e. Learnings audit-log sanity
+
+Verify coverage-reporter's Phase 5.5 actually wrote what it claimed. Read the agent's `learnings_summary` from its return value (added in Phase 8):
+
+```python
+ls = coverage_reporter_return.get("learnings_summary", {})
+log_path = ls.get("log_path")
+
+# Sanity 1: log file exists when summary claims activity
+if (ls.get("added_this_run", 0) + ls.get("incremented_this_run", 0) + ls.get("rejected_this_run", 0)) > 0:
+    assert log_path and Path(log_path).exists(), "learnings_summary claims activity but log missing"
+
+# Sanity 2: tail count matches
+expected_lines = ls["added_this_run"] + ls["incremented_this_run"] + ls.get("promoted_this_run", 0) + ls["rejected_this_run"]
+actual_recent  = count_lines_with_run_id(log_path, run_id)
+if abs(actual_recent - expected_lines) > 0:
+    warnings.append(f"learnings_log_drift: expected {expected_lines}, found {actual_recent}")
+
+# Sanity 3: learnings.json parseable when log non-empty
+if log_path and Path(log_path).exists():
+    lj = Path(project_root) / ".qa-skills" / "learnings.json"
+    if lj.exists():
+        try:
+            data = json.loads(lj.read_text())
+            assert data.get("version") == "1.0"
+        except Exception as e:
+            warnings.append(f"learnings_json_corrupt: {e}")
+```
+
+Drift / corruption → `warnings`, not abort. Learnings is advisory; never block a run on memory issues.
+
+Mark checkpoint `completed: true` only after 9a–9d pass clean. Otherwise `partial`. (9e adds warnings only.)
 
 # Final summary (printed to caller)
 

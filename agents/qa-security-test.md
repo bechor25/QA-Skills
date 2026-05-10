@@ -23,7 +23,12 @@ Generate working security tests targeted at vulnerabilities indicated by code-an
   "warnings": [/* code-analyzer warnings */],
   "locale": "he|en",
   "preflight": {"server_check_url": "http://localhost:8000", "abort_if_no_server": true},
-  "budgets": {"max_tokens": 80000, "max_seconds": 600, "max_fix_iterations_per_file": 2}
+  "budgets": {"max_tokens": 80000, "max_seconds": 600, "max_fix_iterations_per_file": 2},
+  "priors": {
+    "security": [
+      {"id": "...", "rule": "<ALLOWED_RULES.security>", "module_path": "...", "line_range": [..], "tier": "candidate|confirmed", "test_path": "..."}
+    ]
+  }
 }
 ```
 
@@ -42,7 +47,18 @@ Generate working security tests targeted at vulnerabilities indicated by code-an
       "assertions_covered": ["jwt:alg_none_rejected", "sql_injection:login_email", "idor:update_other_user"],
       "execution_result": "passed | failed | partial",
       "vulnerabilities_found": [
-        {"category": "stack_trace_leak", "endpoint": "POST /users", "severity": "medium"}
+        {
+          "category": "security",
+          "rule": "jwt_alg_none_accepted",
+          "module_path": "app/auth.py",
+          "module_hash": "0f9bb6d16b03bd296b49f662283374ac",
+          "line_range": [45, 58],
+          "test_path": "tests/security/auth.security.test.py::test_jwt_none_alg_rejected",
+          "description": "Token with alg=none is accepted by decode_token",
+          "suggested_fix": "Reject tokens with header.alg in {'none', 'None', ''} before signature verify",
+          "matched_prior_id": null,
+          "execution_result": "failed"
+        }
       ]
     }
   ],
@@ -51,6 +67,44 @@ Generate working security tests targeted at vulnerabilities indicated by code-an
   "warnings": []
 }
 ```
+
+## Output requirements for `vulnerabilities_found[]`
+
+This array feeds the learnings memory. Every entry MUST conform to `reference/learnings-schema.md` (load only the `vuln_patterns` section). Specifically:
+
+- `category` — fixed enum, must be `"security"` for findings produced by this agent.
+- `rule` — fixed enum from `ALLOWED_RULES.security`. Reject your own LLM-generated rule strings; pick the closest match. If no match exists, omit the entry — do not invent a rule.
+- `module_path` — relative to `project_root`, must point to the module the test exercises.
+- `module_hash` — `sha256(read(module_path))` at the moment the finding is emitted. Compute via `sha256sum` or in-process. Must be a 64-char lowercase hex string.
+- `line_range` — `[start, end]` inclusive. If finding is a single line, use `[N, N]`.
+- `test_path` — pytest/jest test ID in `path::id` form. Must be a test you actually wrote in this run AND that ran (passed or failed). No test = no finding.
+- `matched_prior_id` — set when `priors[i].rule == this.rule AND priors[i].module_path == this.module_path`. Lets coverage-reporter increment occurrences instead of creating a duplicate.
+
+Findings without all of the above MUST be omitted. Coverage-reporter will reject malformed entries and log them; the failure is silent from the user's perspective.
+
+## Priors input (read-only)
+
+When learnings memory has prior findings for security on this project, orchestrator passes them in `RunContext.priors.security`:
+
+```json
+"priors": {
+  "security": [
+    {
+      "id": "abc123...",
+      "rule": "none_input_guard_missing",
+      "module_path": "app/auth.py",
+      "line_range": [34, 38],
+      "tier": "candidate | confirmed",
+      "test_path": "tests/test_security.py::test_verify_password_none_input"
+    }
+  ]
+}
+```
+
+Behavior on priors:
+- Do NOT regenerate a test that already exists at `prior.test_path` if the file is still present and the prior's `module_path` is unchanged. Re-run it instead.
+- If the test ran in this run, set `matched_prior_id: prior.id` on the finding so coverage-reporter increments occurrences rather than creating a new entry.
+- Priors with `user_status: dismissed_intentional` are filtered out by the validator before reaching you. You will never see them; do not generate tests targeting their rule on their module.
 
 # Hard rules
 

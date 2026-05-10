@@ -45,6 +45,8 @@ Generate working WCAG 2.1 AA accessibility tests for frontend pages. Pre-flight 
   ],
   "tokens_used_estimate": 22000,
   "elapsed_seconds": 90,
+  "artifacts_dir": "${PROJECT_ROOT}/tests/a11y/test-results",
+  "html_report": "${PROJECT_ROOT}/tests/a11y/axe-report/index.html",
   "warnings": []
 }
 ```
@@ -70,14 +72,22 @@ Branch by `language`.
 test -d "${PROJECT_ROOT}/node_modules/@axe-core/playwright" || \
   (cd "${PROJECT_ROOT}" && npm install -D @axe-core/playwright)
 ```
-Reuse `playwright.config.ts` if present. Spec files: `tests/a11y/*.a11y.spec.ts`.
+Reuse `playwright.config.ts` if present. Spec files: `tests/a11y/*.a11y.spec.ts`. Run a11y suite with explicit reporter override so artifacts go to `tests/a11y/`:
+```bash
+cd "${PROJECT_ROOT}" && npx playwright test tests/a11y \
+  --reporter=json,html \
+  --output=tests/a11y/test-results \
+  -c <(cat playwright.config.ts) 2>&1
+# Or simpler: define a separate playwright.a11y.config.ts that extends the base and overrides outputDir + html outputFolder to tests/a11y/.
+```
+Recommended: write `playwright.a11y.config.ts` once (extends `playwright.config.ts`, overrides `outputDir: './tests/a11y/test-results'` and `reporter: [['html', {outputFolder: 'tests/a11y/axe-report'}]]`) and invoke with `--config playwright.a11y.config.ts`.
 
 ## Python branch
 ```bash
 python3 -c "import axe_playwright_python" 2>/dev/null || \
   (source "${PROJECT_ROOT}/.venv/bin/activate" 2>/dev/null; pip install axe-playwright-python)
 ```
-Also ensure pytest-playwright + chromium are present (qa-ui-test should have installed them; verify with `python3 -c "import pytest_playwright"`). Spec files: `tests/test_a11y_*.py` using:
+Also ensure pytest-playwright + chromium are present (qa-ui-test should have installed them; verify with `python3 -c "import pytest_playwright"`). Create `tests/a11y/` directory if absent. Write `tests/a11y/conftest.py` with the same `browser_context_args` fixture as qa-ui-test (independent conftest — does NOT depend on tests/ui/conftest.py). Spec files: `tests/a11y/test_*.py` using:
 ```python
 from playwright.sync_api import Page
 from axe_playwright_python.sync_playwright import Axe
@@ -101,9 +111,9 @@ Group routes by prefix. File extension/path depends on language:
 
 | Group | TS/JS path | Python path |
 |---|---|---|
-| `/`, `/home` | `tests/a11y/home.a11y.spec.ts` | `tests/test_a11y_home.py` |
-| `/login`, `/register` | `tests/a11y/auth.a11y.spec.ts` | `tests/test_a11y_auth.py` |
-| `/dashboard`, `/settings` | `tests/a11y/dashboard.a11y.spec.ts` | `tests/test_a11y_dashboard.py` |
+| `/`, `/home` | `tests/a11y/home.a11y.spec.ts` | `tests/a11y/test_home.py` |
+| `/login`, `/register` | `tests/a11y/auth.a11y.spec.ts` | `tests/a11y/test_auth.py` |
+| `/dashboard`, `/settings` | `tests/a11y/dashboard.a11y.spec.ts` | `tests/a11y/test_dashboard.py` |
 
 # Phase 4 — Generate per page group
 
@@ -121,13 +131,16 @@ For full templates, Read `~/.claude/qa-skills-reference/a11y-test-patterns.md`.
 
 TS/JS:
 ```bash
-cd ${project_root} && npx playwright test tests/a11y --reporter=json 2>&1
+cd ${project_root} && npx playwright test tests/a11y --config playwright.a11y.config.ts --reporter=json 2>&1
 ```
+Output JSON includes `artifacts_dir: "${PROJECT_ROOT}/tests/a11y/test-results"` and `html_report: "${PROJECT_ROOT}/tests/a11y/axe-report/index.html"`.
 
 Python:
 ```bash
-cd ${project_root} && pytest tests/test_a11y_*.py -q --json-report --json-report-file=/tmp/qa-a11y-${run_id}.json 2>&1
+cd ${project_root} && pytest tests/a11y/ -q --json-report --json-report-file=/tmp/qa-a11y-${run_id}.json --html=tests/a11y/axe-report/index.html --self-contained-html --output=tests/a11y/test-results 2>&1
 ```
+
+Output JSON includes `artifacts_dir: "${PROJECT_ROOT}/tests/a11y/test-results"` and `html_report: "${PROJECT_ROOT}/tests/a11y/axe-report/index.html"`.
 
 # Phase 6 — Fix loop
 

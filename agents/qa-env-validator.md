@@ -21,9 +21,12 @@ Verify the project environment is ready for test generation. Check toolchains, t
   "categories_enabled": ["unit", "api", "ui", "security", "a11y", "contract"],
   "checkpoint_dir": "/abs/path/.qa-skills/checkpoints",
   "locale": "he|en",
-  "auto_install": true
+  "auto_install": true,
+  "python_async_detected": false
 }
 ```
+
+`python_async_detected` (Python only): orchestrator sets `true` when code-analyzer reports any route/handler defined with `async def`. Triggers `pytest-asyncio` install in Phase 2.
 
 `auto_install` (default `true`): when a category prerequisite is missing, attempt the install command before removing the category. If install succeeds → keep category enabled. If install fails or `auto_install: false` → remove category and surface action to user.
 
@@ -64,13 +67,31 @@ If `fail` → status: error, return immediately. No tests can be generated.
 
 ## 2. Test framework
 
-**TS/JS:** read `package.json`. If neither `jest` nor `vitest` present → no `unit` category. Else pass.
+All branches follow Phase 3a auto-install flow.
 
-**Python:** check `pip show pytest` returns 0. If not → no `unit`/`api`/`security`/`contract`.
+**TS/JS:**
+- Check: `node -e "const p=require('${project_root}/package.json'); process.exit((p.devDependencies?.jest||p.dependencies?.jest||p.devDependencies?.vitest||p.dependencies?.vitest)?0:1)"`
+- Install cmd: `cd "${project_root}" && npm install -D jest @types/jest ts-jest` (default to Jest unless `vitest.config.*` exists, then vitest).
+- Fail → no `unit` category.
 
-**Java:** check `pom.xml` has `junit-jupiter`. Else → no unit.
+**Python:**
+- Check: `python3 -c "import pytest" 2>/dev/null` (use `${project_root}/.venv/bin/python` if venv).
+- Install cmd: `pip install pytest pytest-json-report` (in venv if present).
+- Fail → no `unit`/`api`/`security`/`contract` categories.
 
-**C#:** check `*.csproj` references `NUnit` or `xunit`. Else → no unit.
+**Python — async support** (only if any route handler is detected `async def` in code-analyzer warnings — passed via input field `python_async_detected: true`):
+- Check: `python3 -c "import pytest_asyncio" 2>/dev/null`
+- Install cmd: `pip install pytest-asyncio` (in venv if present).
+- Fail → keep categories enabled but add warning `"async_tests_may_skip"`.
+
+**Python — JSON report** (always required when Python project + any test category enabled):
+- Check: `python3 -c "import pytest_jsonreport" 2>/dev/null`
+- Install cmd: `pip install pytest-json-report` (in venv if present).
+- Fail → keep categories but warn `"json_report_missing_fallback_to_stdout_parsing"`.
+
+**Java:** check `pom.xml` has `junit-jupiter`. Else → no unit. (No auto-install: requires manual `pom.xml` edit and dependency resolution; safer to surface action.)
+
+**C#:** check `*.csproj` references `NUnit` or `xunit`. Else → no unit. (No auto-install: project file edits + `dotnet add package` is destructive in unknown solution layouts.)
 
 ## 3. UI prerequisites (only if `ui` or `a11y` in categories)
 
@@ -132,7 +153,21 @@ Both follow Phase 3a auto-install flow.
 
 ## 5. Contract prerequisites
 
-Check existence of OpenAPI spec OR `contracts/` directory. If neither → remove `contract`.
+First check existence of OpenAPI spec OR `contracts/` directory. If neither → remove `contract` with reason `"no_openapi_or_contracts_dir"`.
+
+If spec/contracts found, then check schema validator dependency:
+
+**TS/JS:**
+- Check: `test -d "${project_root}/node_modules/ajv"`
+- Install cmd: `cd "${project_root}" && npm install -D ajv ajv-formats`
+- Fail → remove `contract` with action `"npm install -D ajv ajv-formats"`.
+
+**Python:**
+- Check: `python3 -c "import jsonschema" 2>/dev/null`
+- Install cmd: `pip install jsonschema` (in venv if present)
+- Fail → remove `contract` with action `"pip install jsonschema"`.
+
+Both follow Phase 3a auto-install flow.
 
 ## 6. Build readiness
 
