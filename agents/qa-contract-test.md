@@ -148,6 +148,34 @@ Each unique first-segment = own top-level folder under `tests/contract/`. Never 
 
 Every path MUST regex-match: `^tests/contract/(?:[^/]+/)+(test_[^/]+\.py|[^/]+\.(contract\.test|test)\.(ts|js))$` (TS/JS uses `.contract.test.ts` or `.test.ts`; Python uses `test_<name>.py`). Validate before Write. If `path_contract.required_pattern` provided in input, use that.
 
+## ⚠️⚠️⚠️ HIGHEST PRIORITY — `path_contract.expected_files` is an immutable contract
+
+> **If `path_contract.expected_files` is non-empty in your input, IT OVERRIDES every other rule about file structure in this MD.**
+>
+> You produce **EXACTLY** the listed files. Same paths, no substitutions, no additions, no consolidations. Each `expected_files[i].path` → one Write call to that exact path. Each `expected_files[i].covers[]` lists the routes that file must cover.
+>
+> **Do NOT consult `analysis.modules`, your own `derive_domain_and_tag()` reading, or pytest-default heuristics to pick paths. The orchestrator already did that work for you. Your only job is to fill the listed files with appropriate contract-test code.**
+>
+> Suppress training instinct that says "test file mirrors source module". Follow `expected_files`. Orchestrator Phase 9 will delete extras and reject the run.
+>
+> `policy == "exact"`: extras and omissions both fail. Generate every listed path. Generate no path not listed.
+> If `expected_files` is missing/empty: fall back to `derive_domain_and_tag()` rule above.
+
+### How to consume
+
+```python
+expected = path_contract.get("expected_files") or []
+policy   = path_contract.get("policy", "exact")
+if expected and policy == "exact":
+    for entry in expected:
+        target_routes = [r for r in routes if f"{r['method']} {r['path']}" in entry["covers"]]
+        write_contract_test(entry["path"], target_routes)
+    # done.
+else:
+    # legacy derive_domain_and_tag flow
+    ...
+```
+
 # Phase 3 — Generate
 
 **Mode openapi:** for each route, generate test that:

@@ -169,6 +169,22 @@ If spec/contracts found, then check schema validator dependency:
 
 Both follow Phase 3a auto-install flow.
 
+## 5b. Orchestrator validation tools (always required)
+
+The orchestrator's Phase 9d.3 validates `report-data.json` against `report_data.schema.json` using the `jsonschema` lib (Python) / `ajv` (Node). Without this lib, schema breaches escape silently.
+
+**Python projects (always — independent of contract category):**
+- Check: `python3 -c "import jsonschema" 2>/dev/null` (use venv if present)
+- Install cmd: `pip install jsonschema` (in venv if present)
+- Fail → DO NOT remove categories. Add hard warning `"orchestrator_schema_validation_unavailable"`. Phase 9d.3 will skip and emit `schema_validation_skipped`. User sees the gap.
+
+**TS/JS projects (always):**
+- Check: `test -d "${project_root}/node_modules/ajv"` OR `node -e "require('ajv')"`
+- Install cmd: `cd "${project_root}" && npm install -D ajv ajv-formats`
+- Fail → same: warning, no category removal.
+
+Follow Phase 3a auto-install flow. Record under `installs_performed` so user sees it.
+
 ## 6. Build readiness
 
 Try a fast no-op build/typecheck:

@@ -197,6 +197,36 @@ tests/api/auth/test_calc_api.py                  # /api/calc/quote lives under C
 
 Every path MUST regex-match: `^tests/api/(?:[^/]+/)+(test_[^/]+\.py|[^/]+\.(api\.test|test)\.(ts|js))$` (TS/JS uses `.api.test.ts` or `.test.ts`; Python uses `test_<name>.py`). Validate before Write. If `path_contract.required_pattern` provided in input, use that.
 
+## ⚠️⚠️⚠️ HIGHEST PRIORITY — `path_contract.expected_files` is an immutable contract
+
+> **If `path_contract.expected_files` is non-empty in your input, IT OVERRIDES every other rule about file structure in this MD.**
+>
+> You produce **EXACTLY** the listed files. Same paths, no substitutions, no additions, no consolidations. Each `expected_files[i].path` → one Write call to that exact path. Each `expected_files[i].covers[]` lists the routes that file must cover.
+>
+> **Do NOT consult `analysis.modules`, your own `derive_domain_and_tag()` reading, or pytest-default heuristics to pick paths. The orchestrator already did that work for you. Your only job is to fill the listed files with appropriate test code.**
+>
+> Specifically — even if your training instinct says "test file mirrors source module" (e.g. `app/auth.py` → `test_auth.py`), **suppress that instinct**. Follow `expected_files`. The orchestrator's Phase 9 will delete any extras you produce and reject the run.
+>
+> If `policy == "exact"`: extras and omissions both fail. Generate every listed path. Do not generate any path not listed.
+> If `expected_files` is missing or empty: fall back to the `derive_domain_and_tag()` rule above.
+
+### How to consume `expected_files`
+
+```python
+expected = path_contract.get("expected_files") or []
+policy   = path_contract.get("policy", "exact")
+
+if expected and policy == "exact":
+    for entry in expected:
+        # entry = {"path": "tests/api/auth/test_login.py", "covers": ["POST /api/login"]}
+        target_routes = [r for r in routes if f"{r['method']} {r['path']}" in entry["covers"]]
+        write_test_file(entry["path"], target_routes)
+    # DONE. Do not write anything else.
+else:
+    # legacy path: derive_domain_and_tag flow
+    ...
+```
+
 # Phase 4 — Generate per endpoint
 
 For every route, generate:

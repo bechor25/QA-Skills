@@ -187,6 +187,34 @@ Each unique first-segment of route.path = own top-level folder under `tests/secu
 
 Every path MUST regex-match: `^tests/security/(?:[^/]+/)+(test_[^/]+\.py|[^/]+\.(security\.test|test)\.(ts|js))$` (TS/JS uses `.security.test.ts` or `.test.ts`; Python uses `test_<name>.py`). Validate before Write. If `path_contract.required_pattern` provided in input, use that.
 
+## ⚠️⚠️⚠️ HIGHEST PRIORITY — `path_contract.expected_files` is an immutable contract
+
+> **If `path_contract.expected_files` is non-empty in your input, IT OVERRIDES every other rule about file structure in this MD.**
+>
+> Produce **EXACTLY** the listed files. Same paths byte-for-byte. Each `expected_files[i].path` → one Write call. Each `expected_files[i].covers[]` lists the routes that file must cover.
+>
+> Suppress training instinct that says "test file mirrors source module" (e.g. `app/auth.py` → `test_auth.py`). The orchestrator decided structure for you in Phase 2.5. Your job: fill files with security test code.
+>
+> `policy == "exact"`: extras AND omissions both fail. Generate every listed path. Generate no path not listed.
+> If `expected_files` empty/missing: legacy `derive_domain_and_category()` flow above.
+
+### How to consume
+
+```python
+expected = path_contract.get("expected_files") or []
+policy   = path_contract.get("policy", "exact")
+if expected and policy == "exact":
+    for entry in expected:
+        target_routes = [r for r in routes if f"{r['method']} {r['path']}" in entry["covers"]]
+        write_security_tests(entry["path"], target_routes)   # bundle ALL applicable security categories into one file
+    # done.
+else:
+    # legacy flow
+    ...
+```
+
+Note: under `expected_files` policy, all security categories applicable to a route bundle into the **single** test file the orchestrator listed (e.g. one `test_login.py` covers injection + auth + timing). Do not split further — that produced the structure the orchestrator already finalized.
+
 # Phase 1 — Pre-flight
 
 `curl -fsS -o /dev/null --max-time 5 "${SERVER_URL}/"` — same as api-test agent. Skip on failure.

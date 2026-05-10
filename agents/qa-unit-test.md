@@ -103,6 +103,32 @@ Every path you emit MUST regex-match: `^tests/unit/(?:[^/]+/)+(test_[^/]+\.py|[^
 
 If `path_contract` is provided in input, use `path_contract.required_pattern` for validation. Reject your own output if it would fail. Re-derive once before writing.
 
+## ⚠️⚠️⚠️ HIGHEST PRIORITY — `path_contract.expected_files` is an immutable contract
+
+> **If `path_contract.expected_files` is non-empty in your input, IT OVERRIDES every other rule about file structure in this MD.**
+>
+> Produce **EXACTLY** the listed files. Same paths byte-for-byte. Each `expected_files[i].path` → one Write call. Each `expected_files[i].covers[]` lists the source modules that file must cover.
+>
+> Suppress training instinct of mirror-source-tree if it differs from `expected_files`. Orchestrator decided structure in Phase 2.5.
+>
+> `policy == "exact"`: extras AND omissions both fail.
+> If `expected_files` empty/missing: legacy mirror-source-tree flow above.
+
+### How to consume
+
+```python
+expected = path_contract.get("expected_files") or []
+policy   = path_contract.get("policy", "exact")
+if expected and policy == "exact":
+    for entry in expected:
+        target_modules = [m for m in modules if m.get("file") in entry["covers"]]
+        write_unit_tests(entry["path"], target_modules)
+    # done.
+else:
+    # legacy flow
+    ...
+```
+
 ## One-file-per-source-module rule
 
 ONE test file per source module. Never consolidate 5 modules into one mega-file. Five Python modules → five test files in their own domain dirs.

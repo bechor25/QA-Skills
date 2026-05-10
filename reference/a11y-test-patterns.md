@@ -1,6 +1,16 @@
 # Accessibility Test Patterns (WCAG 2.1 AA)
 
-Reference loaded on demand by `qa-a11y-test` agent. Read only the section needed.
+Reference loaded on demand by `qa-a11y-test` agent. Read only the section for the detected language.
+
+**Sections by language:**
+- TS/JS — `@axe-core/playwright`. See "TS/JS Templates" below.
+- Python — `axe-playwright-python`. See "Python Templates" further down.
+
+`path_contract.expected_files` (from orchestrator) is the immutable list. Sub-agent writes EXACTLY those paths.
+
+---
+
+# TS/JS Templates
 
 ## axe-core full-page scan
 
@@ -137,4 +147,140 @@ test('no color contrast violations', async ({ page }) => {
     .analyze();
   expect(results.violations).toEqual([]);
 });
+```
+
+---
+
+# Python Templates (axe-playwright-python)
+
+## tests/a11y/conftest.py
+
+```python
+import pytest
+
+@pytest.fixture(scope="session")
+def base_url():
+    import os
+    return os.environ.get("BASE_URL", "http://localhost:8000")
+```
+
+## Pytest CLI invocation
+
+```bash
+cd "${PROJECT_ROOT}" && \
+  python3 -m pytest tests/a11y/ \
+    --screenshot=on \
+    --output=tests/a11y/test-results \
+    --html=tests/a11y/axe-report/index.html \
+    --self-contained-html \
+    --json-report --json-report-file=.qa-skills/pytest-a11y.json \
+    -v
+```
+
+`--html=tests/a11y/axe-report/index.html` is what coverage-reporter sets as `axe_report` in report-data.json. Mandatory for Phase 9d.2.
+
+## axe full-page scan — `tests/a11y/<page>/test_<page>.py`
+
+```python
+from playwright.sync_api import Page, expect
+from axe_playwright_python.sync_playwright import Axe
+
+def test_home_page_no_critical_violations(page: Page, base_url: str):
+    page.goto(base_url + "/")
+    page.wait_for_load_state("networkidle")
+    axe = Axe()
+    results = axe.run(page, options={"runOnly": ["wcag2a","wcag2aa"]})
+    critical = [v for v in results.response["violations"]
+                if v["impact"] in ("critical","serious")]
+    if critical:
+        for v in critical:
+            print(f"[{v['impact']}] {v['id']}: {v['description']}")
+            for n in v["nodes"]:
+                print(f"  affected: {n['target']}")
+    assert critical == [], f"{len(critical)} critical/serious WCAG violations"
+```
+
+## Focus order
+
+```python
+def test_keyboard_tab_moves_focus(page: Page, base_url: str):
+    page.goto(base_url + "/")
+    page.wait_for_load_state("networkidle")
+    interactive = page.locator(
+        'a[href], button, input:not([type="hidden"]), select, textarea, '
+        '[tabindex]:not([tabindex="-1"])'
+    )
+    count = min(interactive.count(), 20)
+    for _ in range(count):
+        page.keyboard.press("Tab")
+        focused = page.evaluate("() => document.activeElement?.tagName")
+        assert focused, "no element focused after Tab"
+```
+
+## Heading hierarchy
+
+```python
+def test_one_h1_no_skipped_levels(page: Page, base_url: str):
+    page.goto(base_url + "/")
+    page.wait_for_load_state("networkidle")
+    assert page.locator("h1").count() == 1, "expected exactly one h1"
+    levels = []
+    for h in page.locator("h1, h2, h3, h4, h5, h6").all():
+        tag = h.evaluate("el => el.tagName")
+        levels.append(int(tag[1]))
+    for i in range(1, len(levels)):
+        assert levels[i] - levels[i-1] <= 1, f"skipped heading level at index {i}: {levels}"
+```
+
+## ARIA names
+
+```python
+def test_all_buttons_have_accessible_name(page: Page, base_url: str):
+    page.goto(base_url + "/")
+    page.wait_for_load_state("networkidle")
+    for btn in page.locator("button").all():
+        text  = btn.inner_text().strip()
+        aria  = btn.get_attribute("aria-label")
+        title = btn.get_attribute("title")
+        assert text or aria or title, "button missing accessible name"
+
+def test_all_images_have_alt(page: Page, base_url: str):
+    page.goto(base_url + "/")
+    page.wait_for_load_state("networkidle")
+    for img in page.locator("img").all():
+        alt = img.get_attribute("alt")
+        src = img.get_attribute("src")
+        assert alt is not None, f"image missing alt: {src}"
+
+def test_all_inputs_have_labels(page: Page, base_url: str):
+    page.goto(base_url + "/")
+    for inp in page.locator('input:not([type="hidden"])').all():
+        id_   = inp.get_attribute("id")
+        aria  = inp.get_attribute("aria-label")
+        ariaby= inp.get_attribute("aria-labelledby")
+        label_count = page.locator(f'label[for="{id_}"]').count() if id_ else 0
+        assert label_count > 0 or aria or ariaby, f"input {id_} missing label"
+```
+
+## RTL rendering (Hebrew/Arabic)
+
+```python
+def test_rtl_renders_correctly(page: Page, base_url: str):
+    page.goto(base_url + "/")
+    dir_  = page.get_attribute("html", "dir")
+    lang  = page.get_attribute("html", "lang") or ""
+    if lang.startswith("he") or lang.startswith("ar") or dir_ == "rtl":
+        computed = page.evaluate("() => window.getComputedStyle(document.body).direction")
+        assert computed == "rtl"
+```
+
+## Color contrast (subset of axe scan)
+
+```python
+def test_no_color_contrast_violations(page: Page, base_url: str):
+    page.goto(base_url + "/")
+    page.wait_for_load_state("networkidle")
+    axe = Axe()
+    results = axe.run(page, options={"runOnly": {"type": "rule", "values": ["color-contrast"]}})
+    assert results.response["violations"] == []
 ```

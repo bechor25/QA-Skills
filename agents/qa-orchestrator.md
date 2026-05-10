@@ -93,91 +93,14 @@ Build once, reuse across all Task invocations. Keep small (under 5KB). Write lar
 
 # User-visible progress banners
 
-Emit a single-line banner as plain text BEFORE AND AFTER every Task invocation in Phases 1–8. These lines appear in your response text (outside tool calls) so they bubble up through the calling skill to the user. Sub-agents themselves do NOT emit banners — only the orchestrator does, since sub-agent text is captured by the Task tool and never reaches the user.
+Emit a single-line plain-text banner BEFORE AND AFTER every Task invocation in Phases 1–8. These appear in your response text (outside tool calls) and reach the user via the calling skill. Sub-agents do NOT emit banners — Task tool captures their output.
 
-## Emoji-per-agent table
+For emoji table, locale verbs, parallel batch format, and full examples — Read `${CLAUDE_PLUGIN_ROOT}/reference/banners.md` once at start of run.
 
-| Agent                    | Emoji |
-|--------------------------|-------|
-| qa-code-analyzer         | 🔍    |
-| qa-git-diff-analyzer     | 📐    |
-| qa-env-validator         | 🔬    |
-| qa-learnings-validator   | 🧠    |
-| qa-unit-test             | 🧪    |
-| qa-api-test              | 🌐    |
-| qa-ui-test               | 🖥️    |
-| qa-security-test         | 🔒    |
-| qa-a11y-test             | ♿    |
-| qa-contract-test         | 📋    |
-| qa-flaky-detector        | 🎲    |
-| qa-coverage-reporter     | 📊    |
-| qa-html-reporter         | 📄    |
-
-## Banner format
-
-**Before** (locale=en):
-```
-{emoji} {agent} | {short_action}...
-```
-
-**Before** (locale=he):
-```
-{emoji} {agent} | {short_action_he}...
-```
-
-**After** (locale=en):
-```
-{emoji} {agent} | {short_outcome} ({elapsed}s)
-```
-
-**After** (locale=he):
-```
-{emoji} {agent} | {short_outcome_he} ({elapsed} שניות)
-```
-
-**Skipped** (any locale):
-```
-{emoji} {agent} | ⏭️ skipped: {reason}
-```
-
-**Parallel batch**:
-```
-⚡ DISPATCH PARALLEL
-  {emoji} {agent_1} | {short_action}...
-  {emoji} {agent_2} | {short_action}...
-  {emoji} {agent_3} | {short_action}...
-```
-After parallel batch returns, emit each agent's "after" line in completion order.
-
-## Examples
-
-```
-🔍 qa-code-analyzer | scanning code... done (12s, 28 modules, 14 routes)
-📐 qa-git-diff-analyzer | classifying diffs... done (2s, 6 changed)
-🔬 qa-env-validator | checking deps... installed pytest-playwright (3s)
-🧠 qa-learnings-validator | loading priors... 8 confirmed, 3 candidates (1s)
-
-⚡ DISPATCH PARALLEL
-  🧪 qa-unit-test | generating unit tests...
-  🌐 qa-api-test | generating api tests...
-  🔒 qa-security-test | generating security tests...
-
-🧪 qa-unit-test | 12 tests passed (45s, sonnet)
-🌐 qa-api-test | 8 tests passed (38s, sonnet)
-🔒 qa-security-test | 4 tests passed (52s, opus)
-
-🎲 qa-flaky-detector | 3 reruns... 0 flaky (90s)
-📊 qa-coverage-reporter | aggregating... report saved (8s)
-📄 qa-html-reporter | rendering... opened in browser (3s)
-```
-
-## Rules
-
-- One banner BEFORE each Task call. One AFTER each Task call.
-- Banner is plain text in your response, NEVER inside a tool call argument.
-- Never emit banners INSIDE the JSON return value to the caller — only as conversational text.
-- Skip banner only if Task call is a no-op decided pre-emptively (e.g., env-validator removed category before dispatch — print one `⏭️ skipped` line instead).
-- Locale: derive `short_action` / `short_outcome` from caller's `locale`. Action verbs (he): `סורק`, `מתקין`, `יוצר`, `מריץ`, `מסיים`. Outcomes: `הסתיים`, `דולג`, `נכשל`.
+Quick rules (memorize these):
+- One BEFORE + one AFTER per Task call. Plain text only, never inside a tool call.
+- Skipped category → single `⏭️ {agent} | skipped: {reason_code}` line.
+- Parallel dispatch → emit `⚡ DISPATCH PARALLEL` header, then each agent's BEFORE line indented; AFTER lines emitted in completion order.
 
 # Phase 0 — Setup
 
@@ -346,53 +269,34 @@ Write `RunContext.changed_count`, `RunContext.new_count`. Write checkpoint(2).
 
 ## `has_signal()` — explicit definition (REQUIRED)
 
-Use this exact function. Do not improvise. Do not guess.
+Returns `(should_run, skip_reason)`. Use this exact function — do not improvise.
 
 ```python
-def has_signal(category: str, analysis: dict) -> tuple[bool, str]:
-    """
-    Returns (should_run, skip_reason).
-    skip_reason is "" when should_run=True; otherwise an enum value.
-    """
+def has_signal(category, analysis):
     modules = analysis.get("modules", [])
     routes  = analysis.get("routes", [])
-    stats   = analysis.get("stats", {})
-    has_frontend = bool(stats.get("has_frontend"))
-    frontend_kind = analysis.get("frontend_kind", "none")
+    has_fe  = bool(analysis.get("stats", {}).get("has_frontend"))
+    fe_kind = analysis.get("frontend_kind", "none")
 
     if category == "unit":
-        non_frontend = [m for m in modules if m.get("type") != "frontend"]
-        if not non_frontend: return (False, "no_non_frontend_modules")
-        return (True, "")
-
-    if category == "api":
-        if not routes: return (False, "no_routes_detected")
-        return (True, "")
-
-    if category == "contract":
-        if not routes: return (False, "no_routes_detected")
-        return (True, "")
-
+        return ((True,"") if any(m.get("type")!="frontend" for m in modules)
+                else (False,"no_non_frontend_modules"))
+    if category in ("api","contract"):
+        return (True,"") if routes else (False,"no_routes_detected")
     if category == "ui":
-        if not has_frontend: return (False, "no_frontend_detected")
-        if frontend_kind == "none": return (False, "frontend_kind_none")
-        if frontend_kind not in ("spa", "ssr", "mixed"): return (False, f"unsupported_frontend_kind:{frontend_kind}")
-        return (True, "")
-
+        if not has_fe: return (False,"no_frontend_detected")
+        if fe_kind == "none": return (False,"frontend_kind_none")
+        if fe_kind not in ("spa","ssr","mixed"): return (False,f"unsupported_frontend_kind:{fe_kind}")
+        return (True,"")
     if category == "a11y":
-        if not has_frontend: return (False, "no_frontend_detected")
-        if frontend_kind == "none": return (False, "frontend_kind_none")
-        return (True, "")
-
+        if not has_fe: return (False,"no_frontend_detected")
+        if fe_kind == "none": return (False,"frontend_kind_none")
+        return (True,"")
     if category == "security":
-        any_auth = any(m.get("has_auth") for m in modules)
-        any_db   = any(m.get("has_db_queries") for m in modules)
-        any_in   = any(m.get("input_fields") for m in modules)
-        if not (any_auth or any_db or any_in):
-            return (False, "no_auth_db_or_input_signals")
-        return (True, "")
-
-    return (False, f"unknown_category:{category}")
+        if any(m.get("has_auth") or m.get("has_db_queries") or m.get("input_fields") for m in modules):
+            return (True,"")
+        return (False,"no_auth_db_or_input_signals")
+    return (False,f"unknown_category:{category}")
 ```
 
 ## Skip reasons enum (closed list)
@@ -410,6 +314,114 @@ env_validator_removed:<reason> # env-validator pulled this category
 disabled_by_caller             # caller opted out via input.categories
 ```
 
+## `compute_expected_files()` — deterministic path planner (REQUIRED)
+
+> ⚠️⚠️⚠️ **BLOCKING — RUN THIS BEFORE BUILDING THE PLAN** ⚠️⚠️⚠️
+>
+> This function is the **only authority** on which test files each sub-agent must produce. Sub-agents do NOT decide structure on their own — they receive `expected_files` as an immutable contract in their input. Without this step, sub-agents fall back to pytest-default `test mirrors source module` behavior and produce mega-files. **You MUST execute this in Phase 2.5, NOT in Phase 3.**
+
+Use this exact function. Do not improvise.
+
+```python
+AUTH_TOPICS = {"login","register","logout","refresh","me","reset","verify",
+               "forgot","signup","signin"}
+
+def derive_domain_and_tag(route_path):
+    p = route_path.lstrip("/")
+    if p.startswith("api/"): p = p[4:]
+    parts = [s for s in p.split("/") if s and not s.startswith("{")]
+    if not parts: return ("root","index")
+    if parts[0] in AUTH_TOPICS: return ("auth", parts[0])
+    if len(parts) == 1: return (parts[0], parts[0])
+    return (parts[0], parts[1])
+
+def is_api_route(r):
+    """Page-routes (SSR HTML) are NOT API. Used by Phase 9d.1.2 too."""
+    return (r.get("path","").startswith("/api/")
+            or r.get("method","GET").upper() not in ("GET","HEAD")
+            or r.get("requires_auth")
+            or r.get("path","").endswith(".json"))
+
+def compute_expected_files(category, analysis, language):
+    """Returns [{path, covers}, ...]. Sub-agent MUST write exactly this set."""
+    routes   = analysis.get("routes", [])
+    modules  = analysis.get("modules", [])
+    fe_files = analysis.get("frontend_files", [])
+    is_py = (language == "python")
+    py_or_ts = lambda stem, sfx_py, sfx_ts: (
+        f"test_{stem}{sfx_py}.py" if is_py else f"{stem}{sfx_ts}.ts")
+
+    # api/contract/security: one file per (domain, tag) of API routes
+    if category in ("api","contract","security"):
+        pairs = {}
+        for r in (rr for rr in routes if is_api_route(rr)):
+            pairs.setdefault(derive_domain_and_tag(r["path"]), []).append(r)
+        suffixes = {
+            "api":      ("",          ".api.test"),
+            "contract": ("",          ".contract.test"),
+            "security": ("_security", ".security.test"),
+        }
+        sfx_py, sfx_ts = suffixes[category]
+        return [
+            {"path": f"tests/{category}/{d}/{py_or_ts(t, sfx_py, sfx_ts)}",
+             "covers": [f"{r['method']} {r['path']}" for r in rs]}
+            for (d,t), rs in sorted(pairs.items())
+        ]
+
+    # ui/a11y: one file per page (template / SPA route)
+    if category in ("ui","a11y"):
+        SKIP_STEMS = {"_base","base","layout","__init__"}
+        pages, seen = [], set()
+        for f in fe_files:
+            if not isinstance(f, str): continue
+            stem = f.rsplit("/",1)[-1].rsplit(".",1)[0]
+            if stem in SKIP_STEMS or stem in seen: continue
+            seen.add(stem); pages.append((stem, f))
+        sfx_ts = ".spec" if category == "ui" else ".a11y.spec"
+        return [
+            {"path": f"tests/{category}/{stem}/{py_or_ts(stem, '', sfx_ts)}",
+             "covers": [src]}
+            for stem, src in pages
+        ]
+
+    # unit: one file per non-frontend module
+    if category == "unit":
+        DROP = {"src","app","lib","pkg","internal","cmd","__init__","tests"}
+        files = []
+        for m in modules:
+            if m.get("type") == "frontend": continue
+            parts = [p for p in m.get("name","").split(".") if p and p not in DROP]
+            if not parts:
+                seg = [s for s in m.get("file","").replace("\\","/").split("/")
+                       if s and s not in DROP]
+                parts = [seg[-1].rsplit(".",1)[0]] if seg else ["root"]
+            short  = parts[-1]
+            domain = parts[-1] if len(parts) == 1 else parts[-2]
+            files.append({
+                "path": f"tests/unit/{domain}/{py_or_ts(short, '', '.test')}",
+                "covers": [m.get("file","")],
+            })
+        return files
+    return []
+```
+
+Run **once per category** in `categories_planned`. Store result in `expected_files_by_category` for use by Phase 3 dispatch.
+
+```python
+expected_files_by_category = {}
+for cat in plan["summary"]["categories_planned"]:
+    expected_files_by_category[cat] = compute_expected_files(cat, analysis, RunContext.language)
+```
+
+Save to `${logs_dir}/expected_files.json` for Phase 9 cross-check:
+```bash
+python3 - <<'EOF'
+import json
+data = ${EXPECTED_FILES_JSON}
+open("${LOGS_DIR}/expected_files.json","w").write(json.dumps(data, indent=2))
+EOF
+```
+
 ## Build plan
 
 ```python
@@ -417,85 +429,52 @@ plan = {
   "summary": {
     "modules_total": len(analysis["modules"]),
     "modules_changed": len(changed_modules),
-    "categories_planned": [],
-    "categories_skipped": []
-  },
-  ...
-}
-for c in categories_enabled:
-    ok, reason = has_signal(c, analysis)
-    if ok:
-        plan["summary"]["categories_planned"].append(c)
-    else:
-        plan["summary"]["categories_skipped"].append({"name": c, "reason": reason})
-
-# Categories removed by env-validator (Phase 1) carry their own reason — merge in:
-for removed in env_categories_removed:
-    plan["summary"]["categories_skipped"].append({
-        "name": removed["name"],
-        "reason": f"env_validator_removed:{removed.get('reason','unknown')}"
-    })
-```
-
-Build plan (continued):
-
-```python
-plan = {
-  "summary": {
-    "modules_total": len(analysis.modules),
-    "modules_changed": len(changed_modules),
-    "categories_planned": [c for c in categories_enabled if has_signal(c, analysis)],
-    "categories_skipped": [...]
+    "categories_planned": [],   # populated below
+    "categories_skipped": [],
   },
   "agents": [
-    {
-      "agent": "qa-unit-test",
-      "model": "sonnet",
-      "modules_count": len([m for m in changed_modules if m.type != "frontend"]),
-      "estimated_tokens": min(40000, ...),
-      "estimated_minutes": ...
-    },
-    # ...
+    # one entry per planned category, e.g.:
+    # {"agent": "qa-unit-test", "model": "sonnet",
+    #  "modules_count": <int>, "estimated_tokens": <int>, "estimated_minutes": <int>}
   ],
   "budgets": {...},
   "abort_rules": [
     "qa-ui-test smoke fail → skip remaining UI batches",
     "any agent > per_agent_max_tokens → return partial",
-    "3+ agent errors → halt run"
+    "3+ agent errors → halt run",
   ],
-  "mode": "auto"
+  "mode": "auto",
 }
+
+for c in categories_enabled:
+    ok, reason = has_signal(c, analysis)
+    (plan["summary"]["categories_planned"] if ok
+     else plan["summary"]["categories_skipped"]).append(
+        c if ok else {"name": c, "reason": reason})
+
+# env-validator-removed categories carry their own reason
+for r in env_categories_removed:
+    plan["summary"]["categories_skipped"].append({
+        "name": r["name"], "reason": f"env_validator_removed:{r.get('reason','unknown')}"})
 ```
 
-Display to user (via stdout — caller skill relays):
+## Display plan to user
 
-**Hebrew (locale=he):**
-```
-תוכנית ריצה (אוטומטית):
-- {modules_total} modules, {modules_changed} השתנו
-- ייוצרו: {categories_planned}
-- ידולג: {categories_skipped_with_reasons}
-- 📦 הותקן אוטומטית: {installs_performed}   # רק אם env-validator התקין משהו (auto_install=true ברירת מחדל)
-- מודלים: {model_breakdown}
-- זמן משוער: ~{minutes} דקות
-- {abort_summary}
-- מתחיל...
-```
+Render with locale-keyed labels — all bullets share structure, only labels differ:
 
-**English (locale=en):**
-```
-Execution plan (auto):
-- {modules_total} modules, {modules_changed} changed
-- Will generate: {categories_planned}
-- Skipped: {categories_skipped_with_reasons}
-- 📦 Auto-installed: {installs_performed}   # only if env-validator installed something (auto_install=true default)
-- Models: {model_breakdown}
-- Estimated: ~{minutes} minutes
-- {abort_summary}
-- Starting...
-```
+| Field | en | he |
+|---|---|---|
+| Header | `Execution plan (auto):` | `תוכנית ריצה (אוטומטית):` |
+| Modules | `{n} modules, {m} changed` | `{n} modules, {m} השתנו` |
+| Will generate | `Will generate: {planned}` | `ייוצרו: {planned}` |
+| Skipped | `Skipped: {skipped_with_reasons}` | `ידולג: {skipped_with_reasons}` |
+| Installs | `📦 Auto-installed: {installs}` | `📦 הותקן אוטומטית: {installs}` |
+| Models | `Models: {breakdown}` | `מודלים: {breakdown}` |
+| Estimate | `Estimated: ~{m} minutes` | `זמן משוער: ~{m} דקות` |
+| Abort | `{abort_summary}` | `{abort_summary}` |
+| Footer | `Starting...` | `מתחיל...` |
 
-Pull `installs_performed` from env-validator return value. Empty list → omit line entirely. When non-empty, prefix with 📦 emoji so user immediately notices something was installed in their environment. Same list also shows up in the final HTML report (section "Auto-installed dependencies") for full audit trail.
+`installs_performed` comes from env-validator return. Empty → omit Installs line entirely. Non-empty → prefix with 📦 (user notices). Same list also appears in HTML report's "Auto-installed dependencies" section.
 
 If `interactive: true` → use `AskUserQuestion` to confirm before proceeding. Default mode auto-proceeds.
 
@@ -558,17 +537,24 @@ Every Task invocation to a test-gen agent MUST include a `path_contract` block i
   "test_root": "${RunContext.project_root}/tests",
   "category_root": "${RunContext.project_root}/tests/<category>",
   "required_pattern": "^tests/(unit|api|ui|security|a11y|contract)/(?:[^/]+/)+(test_[^/]+\\.py|[^/]+\\.(spec|test|api\\.test|security\\.test|contract\\.test|a11y\\.spec)\\.(ts|js))$",
+  "policy": "exact",
+  "expected_files": [
+    {"path": "tests/api/auth/test_login.py",  "covers": ["POST /api/login"]},
+    {"path": "tests/api/users/test_users.py", "covers": ["GET /api/users", "GET /api/users/{id}"]}
+    /* ... full slice from compute_expected_files(category) */
+  ],
   "rules": [
-    "ALL test files MUST live under ${project_root}/tests/<category>/<domain>/.",
-    "Never write tests anywhere else — not under ${project_root}/sample_app/, not under any sub-package, not flat in ${project_root}/tests/.",
-    "Domain sub-dir mandatory. Derive from source module path: drop common roots (src/, app/, lib/, pages/, templates/, views/, frontend/), use first remaining segment.",
-    "One file per domain (per resource tag). Never one mega-file per agent.",
-    "Ignore any 'source_root' or 'framework' field if it appears in analysis.json — it does not exist by spec."
+    "policy=exact: write EXACTLY the files in expected_files. Filename + folder byte-for-byte.",
+    "Do NOT mirror source modules into mega-files. Do NOT split beyond expected_files.",
+    "All paths under ${project_root}/tests/<category>/<domain>/. Never sub-packages, never flat.",
+    "Ignore any 'source_root' or 'framework' field in analysis.json — does not exist by spec."
   ]
 }
 ```
 
-Agents that emit `outputs[i].path` not matching `required_pattern` get the file deleted and the output rejected. Orchestrator surfaces this as `warnings: ["path_violation: <path>"]` and counts the agent as `partial`.
+`expected_files` = slice of `compute_expected_files()` (Phase 2.5) for the current category. `policy: "exact"` = set equality; extras OR missing both fail. v1 always exact.
+
+Violations: file deleted, output rejected, `warnings: ["path_violation: <path>"]`, agent → `partial`.
 
 For `qa-ui-test`:
 ```json
@@ -755,108 +741,105 @@ print(json.dumps(violations))
 EOF
 ```
 
-### Step 9.d.1.2 — Min file count check (catches mega-file consolidation)
+### Step 9.d.1.2 — Min file count + folder mismatch (uses `expected_files.json` from Phase 2.5)
+
+Uses the deterministic plan written by Phase 2.5 — no need to re-derive routes/pages logic.
+
 ```bash
 python3 - <<'EOF'
-import json
+import json, re
 data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
-analysis = json.loads(open("${ANALYSIS_PATH}").read())
-
-def is_api_route(r):
-    """Distinguish JSON/API routes from SSR HTML page routes.
-    Page routes (GET / with no auth, returning HTML) inflate api/contract expected_min."""
-    if r.get("path","").startswith("/api/"): return True
-    if r.get("method","GET").upper() not in ("GET","HEAD"): return True
-    if r.get("requires_auth"): return True
-    if r.get("path","").endswith(".json"): return True
-    return False
-
-def expected_min_routes(routes):
-    """For api/security/contract — min files = unique (domain, tag) pairs from API routes only.
-    Filters out SSR page routes (`/`, `/login` rendering HTML) that don't represent api endpoints."""
-    api_routes = [r for r in routes if is_api_route(r)]
-    pairs = set()
-    for r in api_routes:
-        p = r["path"].lstrip("/")
-        if p.startswith("api/"): p = p[4:]
-        parts = [s for s in p.split("/") if s and not s.startswith("{")]
-        if not parts: parts = ["root"]
-        auth_topics = {"login","register","logout","refresh","me","reset","verify","forgot","signup","signin"}
-        domain = "auth" if parts[0] in auth_topics else parts[0]
-        tag = parts[0] if len(parts)==1 else parts[1]
-        pairs.add((domain, tag))
-    return max(1, len(pairs))
-
-def expected_min_pages(frontend_files):
-    """For ui/a11y — min files = unique pages (templates / SPA routes)."""
-    pages = [f for f in frontend_files if isinstance(f, str) and (f.endswith(".html") or f.endswith(".tsx") or f.endswith(".jsx") or f.endswith(".vue"))]
-    if not pages: return 1
-    return max(1, min(len(pages), 10))   # cap at 10 to avoid absurd minimums on huge SPAs
+expected = json.loads(open("${LOGS_DIR}/expected_files.json").read())
 
 mega = []
 mismatches = []
-routes = analysis.get("routes", [])
-fe = analysis.get("frontend_files", [])
+for cat, exp_entries in expected.items():
+    cov = data.get("coverage_by_category", {}).get(cat, {})
+    if cov.get("status") not in ("passed","partial"): continue
+    files = cov.get("files", [])
+    expected_min = max(1, len(exp_entries))
+    if len(files) < expected_min:
+        mega.append({"category": cat, "actual": len(files), "expected_min": expected_min})
 
-import re as _re
-def _allowed_pairs_for_routes(api_routes):
-    """Build (domain, tag) pairs that legitimately exist per analysis.routes."""
-    pairs = set()
-    auth_topics = {"login","register","logout","refresh","me","reset","verify","forgot","signup","signin"}
-    for r in api_routes:
-        p = r["path"].lstrip("/")
-        if p.startswith("api/"): p = p[4:]
-        parts = [s for s in p.split("/") if s and not s.startswith("{")]
-        if not parts: parts = ["root"]
-        domain = "auth" if parts[0] in auth_topics else parts[0]
-        tag = parts[0] if len(parts)==1 else parts[1]
-        pairs.add((domain, tag))
-        pairs.add((domain, domain))   # also allow tests/<cat>/<domain>/test_<domain>.py
-    return pairs
+    # Allowed (folder, stem) = pairs derived from expected_files paths
+    # plus (folder, folder) to permit per-domain index files.
+    allowed = set()
+    for e in exp_entries:
+        m = re.match(rf"^tests/{cat}/([^/]+)/(?:test_)?([^_/.]+)", e["path"])
+        if m:
+            allowed.add((m.group(1), m.group(2)))
+            allowed.add((m.group(1), m.group(1)))
 
-def folder_mismatch(cat, files, allowed_pairs):
-    """Flag tests/<cat>/<folder>/test_<stem>.py whose (folder, stem) isn't in allowed_pairs."""
-    bad = []
     for p in files:
-        m = _re.match(rf"^tests/{cat}/([^/]+)/test_([^_/]+)(?:_[^/]+)?\.py$", p)
+        m = re.match(rf"^tests/{cat}/([^/]+)/test_([^_/]+)(?:_[^/]+)?\.py$", p)
         if not m: continue
         folder, stem = m.group(1), m.group(2)
-        if (folder, stem) in allowed_pairs: continue
-        bad.append({"category": cat, "path": p, "folder": folder, "stem": stem})
-    return bad
-
-_api_routes = [r for r in routes if is_api_route(r)]
-_pairs = _allowed_pairs_for_routes(_api_routes)
-
-for cat in ("api","contract","security"):
-    cov = data.get("coverage_by_category", {}).get(cat, {})
-    files = cov.get("files", [])
-    if cov.get("status") in ("passed","partial"):
-        m = expected_min_routes(routes)
-        if len(files) < m:
-            mega.append({"category": cat, "actual": len(files), "expected_min": m})
-        mismatches.extend(folder_mismatch(cat, files, _pairs))
-
-for cat in ("ui","a11y"):
-    cov = data.get("coverage_by_category", {}).get(cat, {})
-    files = cov.get("files", [])
-    if cov.get("status") in ("passed","partial"):
-        m = expected_min_pages(fe)
-        if len(files) < m:
-            mega.append({"category": cat, "actual": len(files), "expected_min": m})
+        if (folder, stem) not in allowed:
+            mismatches.append({"category": cat, "path": p, "folder": folder, "stem": stem})
 
 print(json.dumps({"mega": mega, "domain_folder_mismatches": mismatches}))
 EOF
 ```
 
-### Step 9.d.1.3 — Aggregate
+### Step 9.d.1.3 — Exact match against `expected_files` (BLOCKING)
 
-If Step 9.d.1.1 OR `mega` OR `domain_folder_mismatches` produced any entries → set `final_status = "partial"`, append:
+Cross-check every `coverage_by_category[*].files` entry against the `expected_files.json` written in Phase 2.5. Any extras or missing → violations. Extras are then **deleted from disk** to clean up sub-agent rework artifacts.
+
+```bash
+python3 - <<'EOF'
+import json, os, sys
+data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
+expected = json.loads(open("${LOGS_DIR}/expected_files.json").read())   # {cat: [{path, covers}, ...]}
+
+# Allowlist: paths that are bootstrap / framework-required and exempt from exact-match.
+ALLOWLIST = {
+    "ui": {"tests/ui/test_smoke.py", "tests/ui/e2e/smoke.spec.ts"},
+    "a11y": set(),
+    "api": set(), "contract": set(), "security": set(), "unit": set(),
+}
+
+violations = []
+deletions  = []
+for cat, cov in data.get("coverage_by_category", {}).items():
+    if cov.get("status") not in ("passed","partial"): continue
+    if cat not in expected: continue   # category was skipped — nothing to enforce
+
+    expected_set = {e["path"] for e in expected[cat]}
+    actual_set   = set(cov.get("files", []))
+    allow        = ALLOWLIST.get(cat, set())
+
+    extras  = (actual_set - expected_set) - allow
+    missing = expected_set - actual_set
+
+    for p in sorted(extras):
+        violations.append({"category": cat, "kind": "extra_file",   "path": p})
+        # delete from disk — these are stale rework leftovers
+        full = os.path.join("${PROJECT_ROOT}", p)
+        if os.path.isfile(full):
+            os.remove(full)
+            deletions.append(p)
+    for p in sorted(missing):
+        violations.append({"category": cat, "kind": "missing_file", "path": p})
+
+print(json.dumps({"violations": violations, "deleted": deletions}))
+EOF
+```
+
+After deletion: also remove the now-stale entries from `coverage_by_category[cat].files` and decrement `tests_new` for that category by the matching `tests_written` reported by the sub-agent's `outputs[i]`. Re-write `report-data.json`.
+
+### Step 9.d.1.4 — Aggregate
+
+If Step 9.d.1.1 OR `mega` OR `domain_folder_mismatches` OR Step 9.d.1.3 produced any entries → set `final_status = "partial"`, append:
 - `warnings.append(f"path_violation: {p}")` per entry from 9.d.1.1
 - `warnings.append(f"mega_file_consolidation: {cat} actual={n} expected_min={m}")` per `mega`
 - `warnings.append(f"domain_folder_mismatch: {p} (folder={folder}, stem={stem})")` per `mismatches`
+- `warnings.append(f"path_violation_extra_file: {cat}:{p} (deleted)")` per `extras` from 9.d.1.3
+- `warnings.append(f"path_violation_missing_file: {cat}:{p}")` per `missing` from 9.d.1.3
 
 Surface all to user in final summary so they see exactly which files violate which rule.
+
+> **Why deletions happen here, not on first detection by sub-agent**:
+> Sub-agents are forbidden from deleting their own files (could mask bugs). Orchestrator owns final disk state. If sub-agent self-reworks (e.g., generates mega first, then per-tag), both copies remain on disk; 9.d.1.3 garbage-collects the extras post-hoc. The proper fix — ensuring no rework happens — lives in the `policy: "exact"` contract on first dispatch (Phase 3). 9.d.1.3 is the safety net.
 
 ## 9d.2 — UI/A11y artifacts existence (REQUIRED — execute via Bash)
 
@@ -972,21 +955,14 @@ Mark checkpoint `completed: true` only after 9a–9d.3 pass clean. Otherwise `pa
 
 # Final summary (printed to caller)
 
-Hebrew (locale=he):
-```
-✅ הושלם. ציון איכות: {score}/100
-   חדשות: {new} | עודכנו: {updated} | לא יציבות: {flaky}
-   {gaps} פערים בעדיפות גבוהה — דוח פתוח בדפדפן.
-📄 הדוח: {report_path}
-```
+Locale-keyed template. All four lines render with same structure.
 
-English (locale=en):
-```
-✅ Done. Quality score: {score}/100
-   New: {new} | Updated: {updated} | Flaky: {flaky}
-   {gaps} high-priority gaps — report opened in browser.
-📄 Report: {report_path}
-```
+| Line | en | he |
+|---|---|---|
+| 1 | `✅ Done. Quality score: {score}/100` | `✅ הושלם. ציון איכות: {score}/100` |
+| 2 | `New: {new} \| Updated: {updated} \| Flaky: {flaky}` | `חדשות: {new} \| עודכנו: {updated} \| לא יציבות: {flaky}` |
+| 3 | `{gaps} high-priority gaps — report opened in browser.` | `{gaps} פערים בעדיפות גבוהה — דוח פתוח בדפדפן.` |
+| 4 | `📄 Report: {report_path}` | `📄 הדוח: {report_path}` |
 
 # Hard rules — never violate
 

@@ -323,25 +323,57 @@ Count unique pages from the recon (`Phase 3` output) or `analysis.frontend_files
 ```
 3 templates: index.html, login.html, quote.html
 → minimum 3 spec files:
-  tests/ui/pages/test_home.py        (covers index.html)
-  tests/ui/pages/test_login.py       (covers login.html)
-  tests/ui/pages/test_quote.py       (covers quote.html)
+  tests/ui/home/test_home.py         (covers index.html)
+  tests/ui/login/test_login.py       (covers login.html)
+  tests/ui/quote/test_quote.py       (covers quote.html)
 ```
 
 Bad (rejected):
 ```
 tests/ui/pages/test_ui_pages.py     # mega-file, all 3 pages in one
+tests/ui/pages/test_pages.py        # mega-file under correct root
 tests/ui/test_all.py                # flat
 ```
 
 Good:
 ```
-tests/ui/pages/test_home.py
-tests/ui/pages/test_login.py
-tests/ui/pages/test_quote.py
+tests/ui/home/test_home.py
+tests/ui/login/test_login.py
+tests/ui/quote/test_quote.py
 ```
 
 Orchestrator Phase 9d.1.2 rejects fewer files than `min(len(unique_pages), 10)`.
+
+## ⚠️⚠️⚠️ HIGHEST PRIORITY — `path_contract.expected_files` is an immutable contract
+
+> **If `path_contract.expected_files` is non-empty in your input, IT OVERRIDES every other rule about file structure in this MD.**
+>
+> Produce **EXACTLY** the listed files. Same paths byte-for-byte. Each `expected_files[i].path` → one Write call. Each `expected_files[i].covers[]` lists the page sources that file must cover.
+>
+> Suppress training instinct that says "all pages → one mega `test_pages.py`" or "test mirrors source layout". The orchestrator decided structure for you in Phase 2.5. Your job: fill files with E2E test code.
+>
+> `policy == "exact"`: extras AND omissions both fail. Generate every listed path. Generate no path not listed. (Smoke spec is allowed at `tests/ui/test_smoke.py` even when not in `expected_files` — it is bootstrap, runs before main batches; orchestrator excludes it from exact-match check.)
+>
+> If `expected_files` empty/missing: legacy domain-derivation flow above.
+
+### How to consume
+
+```python
+expected = path_contract.get("expected_files") or []
+policy   = path_contract.get("policy", "exact")
+if expected and policy == "exact":
+    # Smoke first — own bootstrap, never enumerated in expected_files
+    write_smoke_spec("tests/ui/test_smoke.py")
+    if not smoke_passed: return partial
+    # Main batches: exact list
+    for entry in expected:
+        target_pages = entry["covers"]   # e.g. ["sample_app/app/templates/login.html"]
+        write_ui_spec(entry["path"], target_pages)
+    # done.
+else:
+    # legacy flow
+    ...
+```
 
 # Phase 4 — Smoke batch
 

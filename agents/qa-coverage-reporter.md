@@ -110,12 +110,32 @@ coverage[cat] = {"pct": int(covered/total*100) if total else 0, "covered": cover
 For `ui` and `a11y` categories, also collect artifact paths from the source agent's return JSON:
 
 ```python
+def _validate_html_report(p, project_root, category):
+    """playwright_report / axe_report MUST point to a real HTML file. Reject PNGs.
+    Sub-agents are allowed to omit it (None), but if provided it must end in .html and exist."""
+    if not p: return None
+    if not p.endswith(".html"):
+        return None   # PNG / JSON / dir → ignore, use canonical fallback
+    if not Path(p).is_file():
+        return None
+    return p
+
+def _canonical_html_report(category, project_root):
+    if category == "ui":
+        canonical = Path(project_root) / "tests/ui/playwright-report/index.html"
+    else:  # a11y
+        canonical = Path(project_root) / "tests/a11y/axe-report/index.html"
+    return str(canonical) if canonical.is_file() else None
+
 def collect_artifacts(agent_output, category, project_root):
     if not agent_output or category not in {"ui", "a11y"}:
         return None
+    raw_report = agent_output.get("html_report")
+    validated = _validate_html_report(raw_report, project_root, category)
+    if validated is None:
+        validated = _canonical_html_report(category, project_root)   # fall back to canonical
     art = {
-        "playwright_report" if category == "ui" else "axe_report":
-            agent_output.get("html_report"),
+        "playwright_report" if category == "ui" else "axe_report": validated,
         "test_results_dir": agent_output.get("artifacts_dir"),
         "screenshots": [],   # populated by walking test_results_dir below — proof-of-run via --screenshot=on
         "videos": [],
