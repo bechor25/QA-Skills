@@ -210,7 +210,7 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 0.9r
     "T_FLAKY_TESTS": "Flaky tests",
     "T_UI_ARTIFACTS": "UI test artifacts",
     "T_OPEN_PLAYWRIGHT": "Open Playwright report ↗",
-    "T_SCREENSHOTS": "Failure screenshots",
+    "T_SCREENSHOTS": "Screenshots (proof-of-run)",
     "T_VIDEOS": "Videos",
     "T_TRACES": "Traces (open in trace viewer)",
     "T_NO_FAILURES": "No failure artifacts captured ✅",
@@ -240,7 +240,7 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 0.9r
     "T_FLAKY_TESTS": "בדיקות לא יציבות",
     "T_UI_ARTIFACTS": "ארטיפקטים מבדיקות UI",
     "T_OPEN_PLAYWRIGHT": "פתח דוח Playwright ↗",
-    "T_SCREENSHOTS": "צילומי מסך מכשלים",
+    "T_SCREENSHOTS": "צילומי מסך (הוכחת ריצה)",
     "T_VIDEOS": "וידאו",
     "T_TRACES": "Traces (לפתיחה ב-trace viewer)",
     "T_NO_FAILURES": "לא נלכדו ארטיפקטים מכשלים ✅",
@@ -266,15 +266,19 @@ Render only when `report_data.ui_artifacts.playwright_report` is non-null. All p
 
 ```python
 def render_ui_artifacts(ua, t, project_root):
-    if not ua or not ua.get("playwright_report"):
+    if not ua:
         return ""
-    pr = to_relative(ua["playwright_report"], project_root)
+    pr = to_relative(ua["playwright_report"], project_root) if ua.get("playwright_report") else None
     shots = ua.get("screenshots", [])
     vids  = ua.get("videos", [])
     trcs  = ua.get("traces", [])
 
+    if not (pr or shots or vids or trcs):
+        return ""
+
     parts = [f'<section class="card"><h2>{t["T_UI_ARTIFACTS"]}</h2>']
-    parts.append(f'<a class="artifact-link" href="{pr}" target="_blank" rel="noopener">{t["T_OPEN_PLAYWRIGHT"]}</a>')
+    if pr:
+        parts.append(f'<a class="artifact-link" href="{pr}" target="_blank" rel="noopener">{t["T_OPEN_PLAYWRIGHT"]}</a>')
 
     if shots:
         head = shots[:8]; rest = shots[8:24]
@@ -315,14 +319,33 @@ def render_ui_artifacts(ua, t, project_root):
 
 ```python
 def render_a11y_artifacts(aa, t, project_root):
-    if not aa or not aa.get("axe_report"):
+    if not aa:
         return ""
-    rel = to_relative(aa["axe_report"], project_root)
-    return (
-        f'<section class="card"><h2>{t["T_A11Y_ARTIFACTS"]}</h2>'
-        f'<a class="artifact-link" href="{rel}" target="_blank" rel="noopener">{t["T_OPEN_AXE"]}</a>'
-        f'</section>'
-    )
+    rel = to_relative(aa["axe_report"], project_root) if aa.get("axe_report") else None
+    shots = aa.get("screenshots", [])
+
+    if not (rel or shots):
+        return ""
+
+    parts = [f'<section class="card"><h2>{t["T_A11Y_ARTIFACTS"]}</h2>']
+    if rel:
+        parts.append(f'<a class="artifact-link" href="{rel}" target="_blank" rel="noopener">{t["T_OPEN_AXE"]}</a>')
+    if shots:
+        head = shots[:8]; rest = shots[8:24]
+        parts.append(f'<h3 style="margin-top:1.25rem;font-size:1rem;">{t["T_SCREENSHOTS"]} ({len(shots)})</h3>')
+        parts.append('<div class="thumb-grid">')
+        for s in head:
+            r = to_relative(s, project_root); name = s.split("/")[-1]
+            parts.append(f'<a href="{r}" target="_blank" rel="noopener"><img src="{r}" loading="lazy" alt="{name}"><div class="thumb-caption">{name}</div></a>')
+        parts.append('</div>')
+        if rest:
+            parts.append(f'<details><summary>+{len(rest)} more</summary><div class="thumb-grid">')
+            for s in rest:
+                r = to_relative(s, project_root); name = s.split("/")[-1]
+                parts.append(f'<a href="{r}" target="_blank" rel="noopener"><img src="{r}" loading="lazy" alt="{name}"><div class="thumb-caption">{name}</div></a>')
+            parts.append('</div></details>')
+    parts.append('</section>')
+    return "".join(parts)
 ```
 
 ## Auto-installed dependencies section template

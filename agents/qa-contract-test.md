@@ -89,20 +89,59 @@ GET  /api/me             → tests/contract/auth/test_me.py
 
 Routes sharing same `{domain}/{tag}` → ONE file. Different tags within same domain → SEPARATE files. Python: `tests/contract/{domain}/test_{tag}.py`.
 
-## Hard rule — NEVER mega-file
+## Hard rule — domain comes from ROUTE PATH, not source file
 
-ONE file per `{domain}/{tag}`. Minimum file count = number of distinct `{domain}/{tag}` combinations.
-
-Bad (rejected):
+**WRONG:**
 ```
-tests/test_contract.py                  # flat, mega-file
-tests/contract/test_all.py              # mega-file under correct root
-sample_app/tests/test_contract.py       # wrong root
+analysis.modules contains {file: "app/routes.py"} with 8 routes inside.
+Agent groups everything under tests/contract/api/test_api_contract.py.   # mega-file by /api/ prefix
+```
+
+**RIGHT:**
+```
+For each route, derive (domain, tag) from route.path:
+  /api/login          → ("auth","login")        → tests/contract/auth/test_login.py
+  /api/register       → ("auth","register")     → tests/contract/auth/test_register.py
+  /api/me             → ("auth","me")           → tests/contract/auth/test_me.py
+  /api/users          → ("users","users")       → tests/contract/users/test_users.py
+  /api/users/{id}     → ("users","users")       → tests/contract/users/test_users.py (same)
+  /api/calc/quote     → ("calc","quote")        → tests/contract/calc/test_quote.py
+  /api/health         → ("health","health")     → tests/contract/health/test_health.py
+```
+
+Domain derivation function:
+```python
+def derive_domain_and_tag(route_path: str) -> tuple[str, str]:
+    p = route_path.lstrip("/")
+    if p.startswith("api/"): p = p[4:]
+    parts = [seg for seg in p.split("/") if seg and not seg.startswith("{")]
+    if not parts: return ("root", "index")
+    auth_topics = {"login","register","logout","refresh","me","reset","verify","forgot","signup","signin"}
+    if parts[0] in auth_topics:
+        return ("auth", parts[0])
+    if len(parts) == 1:
+        return (parts[0], parts[0])
+    return (parts[0], parts[1])
+```
+
+## Minimum file count enforcement
+
+Count `unique (domain, tag)` pairs across all routes. That is the **minimum** number of test files.
+
+Writing fewer = orchestrator Phase 9d.1 rejects with `path_violation: mega_file_consolidation`.
+
+## Forbidden patterns
+
+```
+tests/test_contract.py                          # flat, mega-file
+tests/contract/test_all.py                      # mega-file under correct root
+tests/contract/api/test_api_contract.py         # /api/ used as domain — WRONG, strip /api/ first
+sample_app/tests/test_contract.py               # wrong root
 ```
 
 ## Path enforcement (BEFORE writing each file)
 
-Every path MUST regex-match: `^tests/contract/[^/]+/.+\.(contract\.test|test)\.(ts|js|py)$`. Validate before Write. If `path_contract.required_pattern` provided in input, use that.
+Every path MUST regex-match: `^tests/contract/(?:[^/]+/)+(test_[^/]+\.py|[^/]+\.(contract\.test|test)\.(ts|js))$` (TS/JS uses `.contract.test.ts` or `.test.ts`; Python uses `test_<name>.py`). Validate before Write. If `path_contract.required_pattern` provided in input, use that.
 
 # Phase 3 — Generate
 

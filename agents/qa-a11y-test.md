@@ -54,6 +54,10 @@ Generate working WCAG 2.1 AA accessibility tests for frontend pages. Pre-flight 
 }
 ```
 
+## Hard rule — `tests/a11y/test-results/` MUST contain ≥1 PNG
+
+With `--screenshot=on`, pytest-playwright auto-captures one PNG per test. If 0 PNGs in `tests/a11y/test-results/` → return `status: "error", reason: "no_screenshots_captured — a11y did not actually run"`.
+
 # Hard rules
 
 1. Pre-flight check first. No server → skipped.
@@ -102,13 +106,14 @@ Verify pytest-playwright + chromium are present (env-validator owns installs; if
 **Required pytest CLI flags (every a11y invocation):**
 ```
 --browser=chromium
---screenshot=only-on-failure
+--screenshot=on
 --video=retain-on-failure
 --tracing=retain-on-failure
 --output=tests/a11y/test-results
 --html=tests/a11y/axe-report/index.html
 --self-contained-html
 ```
+`--screenshot=on` (not `only-on-failure`) — captures one PNG per test = proof every page actually rendered.
 
 **Post-run artifact existence check (REQUIRED):**
 ```bash

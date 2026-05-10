@@ -132,18 +132,55 @@ GET  /admin/users  + privilege_escalation → tests/security/admin/test_privileg
 
 ONE file per `{domain}/{category}` combo. Multiple categories on same domain → multiple files. Multiple routes within same `{domain}/{category}` → group into one file.
 
-## Hard rule — NEVER mega-file
+## Hard rule — domain comes from ROUTE PATH, not source file
 
-Bad (rejected):
+**WRONG:**
 ```
-tests/test_security.py                  # flat, mega-file
-tests/security/test_all.py              # mega-file under correct root
-sample_app/tests/test_security.py       # wrong root
+analysis.modules contains {file: "app/routes.py"} with 8 routes inside.
+Agent groups everything under tests/security/routes/test_routes_security.py.   # mega-file by source name
+```
+
+**RIGHT:**
+```
+For each route + each active security category, derive (domain, category):
+  /api/login   + injection      → tests/security/auth/test_injection.py
+  /api/login   + auth           → tests/security/auth/test_auth.py
+  /api/login   + timing         → tests/security/auth/test_timing.py
+  /api/users   + idor           → tests/security/users/test_idor.py
+  /api/users   + mass_assign    → tests/security/users/test_mass_assignment.py
+  /api/calc/quote + injection   → tests/security/calc/test_injection.py
+  /api/admin/* + privilege      → tests/security/admin/test_privilege.py
+```
+
+Domain derivation function:
+```python
+def derive_domain_and_category(route_path: str, sec_category: str) -> tuple[str, str]:
+    p = route_path.lstrip("/")
+    if p.startswith("api/"): p = p[4:]
+    parts = [seg for seg in p.split("/") if seg and not seg.startswith("{")]
+    auth_topics = {"login","register","logout","refresh","me","reset","verify","forgot","signup","signin"}
+    domain = "auth" if (parts and parts[0] in auth_topics) else (parts[0] if parts else "root")
+    return (domain, sec_category)   # category = "injection","xss","idor","auth","timing","mass_assignment", etc.
+```
+
+## Minimum file count enforcement
+
+Count `unique (domain, category)` pairs across all routes × all activated categories. That is the **minimum** number of files.
+
+Writing fewer = orchestrator Phase 9d.1 rejects with `path_violation: mega_file_consolidation`.
+
+## Forbidden patterns
+
+```
+tests/test_security.py                            # flat, mega-file
+tests/security/test_all.py                        # mega-file under correct root
+tests/security/routes/test_routes_security.py     # source-file domain — WRONG
+sample_app/tests/test_security.py                 # wrong root
 ```
 
 ## Path enforcement (BEFORE writing each file)
 
-Every path MUST regex-match: `^tests/security/[^/]+/.+\.(security\.test|test)\.(ts|js|py)$`. Validate before Write. If `path_contract.required_pattern` provided in input, use that.
+Every path MUST regex-match: `^tests/security/(?:[^/]+/)+(test_[^/]+\.py|[^/]+\.(security\.test|test)\.(ts|js))$` (TS/JS uses `.security.test.ts` or `.test.ts`; Python uses `test_<name>.py`). Validate before Write. If `path_contract.required_pattern` provided in input, use that.
 
 # Phase 1 — Pre-flight
 

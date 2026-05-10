@@ -51,7 +51,7 @@ Generate working Playwright E2E tests for a frontend app. Fail fast on environme
   },
   "options": {
     "headless": true,
-    "screenshots": "only-on-failure",
+    "screenshots": "on",
     "trace": "on-first-retry",
     "video": "retain-on-failure",
     "enable_visual_regression": false,
@@ -93,6 +93,10 @@ Return ONLY this JSON object. No prose, no test code, no logs.
   "warnings": []
 }
 ```
+
+## Hard rule — `tests/ui/test-results/` MUST contain ≥1 PNG
+
+With `--screenshot=on`, pytest-playwright auto-captures one PNG at the end of every test. If `find tests/ui/test-results/ -name '*.png' | wc -l` returns 0 → tests did not actually run → return `status: "error", reason: "no_screenshots_captured — UI did not actually run"`. Orchestrator Phase 9d.2 also enforces this.
 
 # Phase 1 — Pre-flight gate
 

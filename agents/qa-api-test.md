@@ -110,29 +110,82 @@ Routes sharing same `{domain}/{tag}` → ONE file (e.g. GET + POST + DELETE on `
 
 Python equivalent: `tests/api/{domain}/test_{tag}.py`.
 
-## Hard rule — NEVER mega-file
+## Hard rule — domain comes from ROUTE PATH, not source file
 
-ONE file per `{domain}/{tag}`. **Never** dump every route into one `tests/test_api.py` or `tests/api/test_all.py`. Minimum file count = number of distinct `{domain}/{tag}` combinations.
+This is the most common mistake. Read this section before generating any file.
 
-Bad (rejected):
+**WRONG (do not do this):**
 ```
-tests/test_api.py                # flat, mega-file
-tests/api/test_all.py            # mega-file under correct root
-sample_app/tests/test_api.py     # wrong root
+analysis.modules contains {file: "app/routes.py"} with 8 routes inside.
+Agent thinks: "all 8 routes live in routes.py → group under routes/".
+Agent writes: tests/api/routes/test_routes_api.py  ← ONE mega-file, 280 lines, all routes
 ```
 
-Good:
+**RIGHT (do this):**
 ```
-tests/api/auth/test_login.py
-tests/api/auth/test_register.py
-tests/api/users/test_users.py
-tests/api/calc/test_quote.py
-tests/api/health/test_health.py
+analysis.routes contains 8 entries. For each route, derive domain from route.path:
+  /api/login         → strip /api/ → first segment "login" → group with auth domain
+  /api/register      → strip /api/ → "register"            → group with auth domain
+  /api/me            → strip /api/ → "me"                  → group with auth domain
+  /api/users         → strip /api/ → "users"               → users domain
+  /api/users/{id}    → strip /api/ → "users"               → users domain (same)
+  /api/calc/quote    → strip /api/ → "calc"                → calc domain
+  /api/health        → strip /api/ → "health"              → health domain
+
+Result — 5 files (one per topic):
+  tests/api/auth/test_login.py
+  tests/api/auth/test_register.py
+  tests/api/auth/test_me.py
+  tests/api/users/test_users.py        (groups GET /users + GET /users/{id})
+  tests/api/calc/test_quote.py
+  tests/api/health/test_health.py
+```
+
+**Domain derivation function (run mentally before writing each file):**
+```python
+def derive_domain_and_tag(route_path: str) -> tuple[str, str]:
+    # Strip leading /api/ if present
+    p = route_path.lstrip("/")
+    if p.startswith("api/"): p = p[4:]
+    parts = [seg for seg in p.split("/") if seg and not seg.startswith("{")]
+    if not parts: return ("root", "index")
+    # Topic-style grouping: auth-related verbs cluster under "auth"
+    auth_topics = {"login","register","logout","refresh","me","reset","verify","forgot","signup","signin"}
+    if parts[0] in auth_topics:
+        return ("auth", parts[0])
+    if len(parts) == 1:                # /users        → users/users
+        return (parts[0], parts[0])
+    return (parts[0], parts[1])         # /calc/quote   → calc/quote
+```
+
+## Minimum file count enforcement
+
+Count `unique (domain, tag)` pairs after derivation. That is the **minimum** number of test files you must produce.
+
+If `analysis.routes` has 8 distinct (domain, tag) pairs → you must write ≥8 files (one per pair).
+
+Before writing your first file, list the pairs:
+```
+pairs = sorted({derive_domain_and_tag(r["path"]) for r in routes})
+# e.g. [("auth","login"), ("auth","register"), ("auth","me"),
+#       ("calc","quote"), ("health","health"), ("users","users")]
+# → 6 files minimum.
+```
+
+Writing fewer than `len(pairs)` files = output rejected by orchestrator Phase 9d.1 with `path_violation: mega_file_consolidation`.
+
+## Forbidden patterns
+
+```
+tests/test_api.py                                # flat, mega-file
+tests/api/test_all.py                            # mega-file under correct root
+tests/api/routes/test_routes_api.py              # source-file domain (route.py → routes/) — WRONG
+sample_app/tests/test_api.py                     # wrong root
 ```
 
 ## Path enforcement (BEFORE writing each file)
 
-Every path MUST regex-match: `^tests/api/[^/]+/.+\.(api\.test|test)\.(ts|js|py)$`. Validate before Write. If `path_contract.required_pattern` provided in input, use that.
+Every path MUST regex-match: `^tests/api/(?:[^/]+/)+(test_[^/]+\.py|[^/]+\.(api\.test|test)\.(ts|js))$` (TS/JS uses `.api.test.ts` or `.test.ts`; Python uses `test_<name>.py`). Validate before Write. If `path_contract.required_pattern` provided in input, use that.
 
 # Phase 4 — Generate per endpoint
 

@@ -214,46 +214,69 @@ Write checkpoint after every phase:
 
 Invoke `qa-code-analyzer` via Task tool. Pass `RunContext`. Agent writes `analysis.json` to `${logs_dir}/analysis.json` and returns a small summary (counts, language, paths). Update `RunContext.language` from result.
 
-## Phase 1a — Validate analyzer output (REQUIRED)
+## Phase 1a — Validate analyzer output (REQUIRED — execute every step)
 
-After code-analyzer returns, read `analysis.json` and validate shape. Reject creativity:
+**This is not a description. Execute each step in order via the Bash tool. Do not skip. Do not summarize.**
 
-```python
-import json
-data = json.loads(open(analysis_path).read())
-
-# Schema enforcement
-required_top = ["language","scanned_at","project_root","frontend_kind","modules","routes","frontend_files","stats","warnings"]
-forbidden_top = ["source_root","framework","python_async_detected","effective_project_root"]
-
-# 1. Required top-level keys
-missing = [k for k in required_top if k not in data]
-# 2. Forbidden invented keys → strip + warn
-stripped = []
-for k in forbidden_top:
-    if k in data:
-        stripped.append(k)
-        del data[k]
-# 3. modules MUST be array
-if not isinstance(data.get("modules"), list):
-    abort = "analyzer_modules_not_array"
-# 4. routes MUST be array of {method, path, handler, file, requires_auth}
-route_keys = {"method","path","handler","file","requires_auth"}
-for r in data.get("routes", []):
-    if not route_keys.issubset(r.keys()):
-        warnings.append(f"route_missing_keys: {route_keys - r.keys()}")
-# 5. project_root MUST equal RunContext.project_root
-if data.get("project_root") != run_context["project_root"]:
-    data["project_root"] = run_context["project_root"]
-    warnings.append("project_root_overridden_to_runcontext")
-
-# Re-write analysis.json with stripped/normalized data
-open(analysis_path, "w").write(json.dumps(data, indent=2))
+### Step 1.a.1 — Read analysis.json
+```bash
+cat "${ANALYSIS_PATH}"
 ```
+Pipe into your context. You need the actual content, not a summary.
 
-If `missing` non-empty OR `modules` not array → re-invoke code-analyzer ONCE with explicit format reminder appended to prompt: `"Your previous output had: <issues>. Re-emit STRICTLY matching the Phase 5 template. modules MUST be a JSON array, not a dict."` Still bad → abort with `status: error, reason: "code_analyzer_schema_violation"`.
+### Step 1.a.2 — Strip forbidden keys (run via Bash)
+```bash
+python3 - <<'EOF'
+import json, sys
+PATH = "${ANALYSIS_PATH}"
+data = json.loads(open(PATH).read())
+forbidden = ["source_root","framework","python_async_detected","effective_project_root"]
+stripped = [k for k in forbidden if k in data]
+for k in stripped: del data[k]
+# Also strip stats.framework / stats.language / stats.total_routes if present
+if isinstance(data.get("stats"), dict):
+    for k in ("framework","language","total_routes"):
+        data["stats"].pop(k, None)
+open(PATH, "w").write(json.dumps(data, indent=2))
+print(json.dumps({"stripped_top": stripped}))
+EOF
+```
+If output shows non-empty `stripped_top` → emit banner: `🔍 qa-code-analyzer | stripped invented fields: <list>`.
 
-If `stripped` non-empty → emit user-visible warning: `🔍 qa-code-analyzer | stripped invented fields: {stripped}`.
+### Step 1.a.3 — Validate required keys (run via Bash, exit non-zero on fail)
+```bash
+python3 - <<'EOF'
+import json, sys
+data = json.loads(open("${ANALYSIS_PATH}").read())
+required = ["language","scanned_at","project_root","frontend_kind","modules","routes","frontend_files","stats","warnings"]
+missing  = [k for k in required if k not in data]
+if missing:
+    print(f"FAIL missing: {missing}", file=sys.stderr); sys.exit(2)
+if not isinstance(data["modules"], list):
+    print("FAIL modules_not_array", file=sys.stderr); sys.exit(3)
+route_keys = {"method","path","handler","file","requires_auth"}
+bad_routes = [i for i,r in enumerate(data.get("routes",[])) if not route_keys.issubset(r.keys())]
+if bad_routes:
+    print(f"WARN routes missing keys at indices {bad_routes}", file=sys.stderr)
+print("OK")
+EOF
+```
+- exit 0 → continue.
+- exit 2 (missing) OR exit 3 (modules_not_array) → re-invoke code-analyzer ONCE with prompt suffix: `"Your previous output failed validation: <stderr>. Re-emit STRICTLY matching the Phase 5 template. modules MUST be a JSON array, not a dict. Do not add fields outside the schema."` Re-run Step 1.a.3. Still fails → abort run with `status: error, reason: "code_analyzer_schema_violation: <stderr>"`.
+
+### Step 1.a.4 — Force project_root to match RunContext (run via Bash)
+```bash
+python3 - <<'EOF'
+import json
+PATH = "${ANALYSIS_PATH}"; EXPECTED = "${RUN_CONTEXT_PROJECT_ROOT}"
+data = json.loads(open(PATH).read())
+if data.get("project_root") != EXPECTED:
+    data["project_root"] = EXPECTED
+    open(PATH,"w").write(json.dumps(data, indent=2))
+    print("project_root_overridden")
+EOF
+```
+Output `project_root_overridden` → add to `warnings: ["project_root_overridden_to_runcontext"]`.
 
 Then invoke `qa-git-diff-analyzer`. It updates `analysis.json` in-place (adds `diff_class` per module). Returns counts.
 
@@ -315,7 +338,100 @@ Write `RunContext.changed_count`, `RunContext.new_count`. Write checkpoint(2).
 
 **Default mode: `auto` — build the plan, display it to the user as a status line, then proceed immediately. Do not pause for confirmation.**
 
-Build plan:
+## `has_signal()` — explicit definition (REQUIRED)
+
+Use this exact function. Do not improvise. Do not guess.
+
+```python
+def has_signal(category: str, analysis: dict) -> tuple[bool, str]:
+    """
+    Returns (should_run, skip_reason).
+    skip_reason is "" when should_run=True; otherwise an enum value.
+    """
+    modules = analysis.get("modules", [])
+    routes  = analysis.get("routes", [])
+    stats   = analysis.get("stats", {})
+    has_frontend = bool(stats.get("has_frontend"))
+    frontend_kind = analysis.get("frontend_kind", "none")
+
+    if category == "unit":
+        non_frontend = [m for m in modules if m.get("type") != "frontend"]
+        if not non_frontend: return (False, "no_non_frontend_modules")
+        return (True, "")
+
+    if category == "api":
+        if not routes: return (False, "no_routes_detected")
+        return (True, "")
+
+    if category == "contract":
+        if not routes: return (False, "no_routes_detected")
+        return (True, "")
+
+    if category == "ui":
+        if not has_frontend: return (False, "no_frontend_detected")
+        if frontend_kind == "none": return (False, "frontend_kind_none")
+        if frontend_kind not in ("spa", "ssr", "mixed"): return (False, f"unsupported_frontend_kind:{frontend_kind}")
+        return (True, "")
+
+    if category == "a11y":
+        if not has_frontend: return (False, "no_frontend_detected")
+        if frontend_kind == "none": return (False, "frontend_kind_none")
+        return (True, "")
+
+    if category == "security":
+        any_auth = any(m.get("has_auth") for m in modules)
+        any_db   = any(m.get("has_db_queries") for m in modules)
+        any_in   = any(m.get("input_fields") for m in modules)
+        if not (any_auth or any_db or any_in):
+            return (False, "no_auth_db_or_input_signals")
+        return (True, "")
+
+    return (False, f"unknown_category:{category}")
+```
+
+## Skip reasons enum (closed list)
+
+Every entry in `categories_skipped` MUST use one of these reason codes. Free-form text rejected.
+
+```
+no_non_frontend_modules        # only frontend code present
+no_routes_detected             # no API routes found
+no_frontend_detected           # backend-only project
+frontend_kind_none             # frontend dir exists but no spa/ssr signals
+unsupported_frontend_kind:<x>  # detected kind not supported
+no_auth_db_or_input_signals    # no security signals present
+env_validator_removed:<reason> # env-validator pulled this category
+disabled_by_caller             # caller opted out via input.categories
+```
+
+## Build plan
+
+```python
+plan = {
+  "summary": {
+    "modules_total": len(analysis["modules"]),
+    "modules_changed": len(changed_modules),
+    "categories_planned": [],
+    "categories_skipped": []
+  },
+  ...
+}
+for c in categories_enabled:
+    ok, reason = has_signal(c, analysis)
+    if ok:
+        plan["summary"]["categories_planned"].append(c)
+    else:
+        plan["summary"]["categories_skipped"].append({"name": c, "reason": reason})
+
+# Categories removed by env-validator (Phase 1) carry their own reason — merge in:
+for removed in env_categories_removed:
+    plan["summary"]["categories_skipped"].append({
+        "name": removed["name"],
+        "reason": f"env_validator_removed:{removed.get('reason','unknown')}"
+    })
+```
+
+Build plan (continued):
 
 ```python
 plan = {
@@ -383,16 +499,33 @@ Save plan JSON to `${logs_dir}/strategy.json`. Write checkpoint(2.5).
 
 Invoke applicable test-generation agents **in parallel** by issuing multiple Task calls in a single response. Each agent runs in its own isolated context.
 
-Decision matrix (only invoke if signal present AND in `categories_enabled`):
+Decision matrix — **use `has_signal()` from Phase 2.5 as the sole authority.** Do not re-derive logic here.
 
-| Condition | Agent |
-|-----------|-------|
-| Always (modules with non-frontend type changed) | `qa-unit-test` |
-| `analysis.routes` non-empty AND controller modules changed | `qa-api-test` |
-| `analysis.stats.has_frontend` AND frontend modules changed AND `analysis.frontend_kind ∈ {spa, ssr, mixed}` AND `ui ∈ categories_enabled` | `qa-ui-test` |
-| Module has `has_auth` OR `has_db_queries` OR non-empty `input_fields` | `qa-security-test` |
-| `a11y` enabled AND `has_frontend` | `qa-a11y-test` |
-| `contract` enabled AND routes non-empty | `qa-contract-test` |
+```python
+for cat in ("unit", "api", "ui", "security", "a11y", "contract"):
+    if cat not in categories_enabled:
+        continue   # already in categories_skipped with reason "disabled_by_caller"
+    ok, reason = has_signal(cat, analysis)
+    if not ok:
+        # Already in plan["summary"]["categories_skipped"] from Phase 2.5; do nothing here.
+        continue
+    dispatch(CATEGORY_TO_AGENT[cat])   # qa-unit-test, qa-api-test, etc.
+```
+
+| Category | Agent | Skip when (reason code) |
+|---|---|---|
+| `unit`     | `qa-unit-test`     | `no_non_frontend_modules` |
+| `api`      | `qa-api-test`      | `no_routes_detected` |
+| `ui`       | `qa-ui-test`       | `no_frontend_detected` / `frontend_kind_none` / `unsupported_frontend_kind:<x>` |
+| `security` | `qa-security-test` | `no_auth_db_or_input_signals` |
+| `a11y`     | `qa-a11y-test`     | `no_frontend_detected` / `frontend_kind_none` |
+| `contract` | `qa-contract-test` | `no_routes_detected` |
+
+Emit one `⏭️ skipped` banner per category with the exact reason code. Example for backend-services project:
+```
+⏭️ qa-ui-test    | skipped: no_frontend_detected
+⏭️ qa-a11y-test  | skipped: no_frontend_detected
+```
 
 Do NOT skip `qa-ui-test` for SSR apps — qa-ui-test supports both. The agent itself decides patterns based on `frontend_kind`. Server-rendered apps still get real browser tests (Playwright launches Chromium and hits the live server), they just use different wait strategies. Only skip UI when env-validator removed it (e.g., pytest-playwright not installed).
 
@@ -418,7 +551,7 @@ Every Task invocation to a test-gen agent MUST include a `path_contract` block i
   "project_root": "${RunContext.project_root}",
   "test_root": "${RunContext.project_root}/tests",
   "category_root": "${RunContext.project_root}/tests/<category>",
-  "required_pattern": "^tests/(unit|api|ui|security|a11y|contract)/[^/]+/.+\\.(spec|test|api\\.test|security\\.test|contract\\.test|a11y\\.spec)\\.(ts|js|py)$",
+  "required_pattern": "^tests/(unit|api|ui|security|a11y|contract)/(?:[^/]+/)+(test_[^/]+\\.py|[^/]+\\.(spec|test|api\\.test|security\\.test|contract\\.test|a11y\\.spec)\\.(ts|js))$",
   "rules": [
     "ALL test files MUST live under ${project_root}/tests/<category>/<domain>/.",
     "Never write tests anywhere else — not under ${project_root}/sample_app/, not under any sub-package, not flat in ${project_root}/tests/.",
@@ -444,7 +577,7 @@ For `qa-ui-test`:
     "smoke_first": true,
     "marker": "<derive_marker(analysis)>"
   },
-  "options": { "headless": true, "screenshots": "only-on-failure", "trace": "on-first-retry", "video": "retain-on-failure", ... }
+  "options": { "headless": true, "screenshots": "on", "trace": "on-first-retry", "video": "retain-on-failure", ... }
 }
 ```
 
@@ -590,65 +723,141 @@ For every `path` in any `coverage_by_category[*].files`:
 test -f "${PROJECT_ROOT}/${path}" || FAIL("missing on disk: ${path}")
 ```
 
-## 9d.1 — Path contract enforcement (NEW)
+## 9d.1 — Path contract enforcement (REQUIRED — execute every step)
 
-For every reported test path, regex-match against `path_contract.required_pattern`:
+**Execute via Bash. Do not skip. Do not summarize.** Capture stdout into `gate_9d1_violations`.
 
-```python
-import re
-PATTERN = re.compile(r"^tests/(unit|api|ui|security|a11y|contract)/[^/]+/.+\.(spec|test|api\.test|security\.test|contract\.test|a11y\.spec)\.(ts|js|py)$")
-violations = []
-for cat, cov in report_data["coverage_by_category"].items():
-    for p in cov.get("files", []):
-        rel = p.replace(project_root + "/", "")
-        if not PATTERN.match(rel):
-            violations.append(rel)
-if violations:
-    warnings.append(f"path_violations: {violations}")
-    # Mark `status: partial` — flat or wrong-root paths leaked through.
-```
-
-Common violations to catch:
-- `tests/test_unit_auth.py` (flat, no category dir, no domain dir)
-- `sample_app/tests/...` (wrong root — sub-package leak)
-- `tests/api.test.py` (mega-file, no domain dir)
-
-## 9d.2 — UI/A11y artifacts existence (NEW)
-
-If `coverage_by_category.ui` exists AND status in `("passed","partial")`:
-
-```python
-ui_art = report_data.get("ui_artifacts") or {}
-results_dir = ui_art.get("test_results_dir")
-html_report = ui_art.get("playwright_report")
-
-if not results_dir or not Path(results_dir).is_dir():
-    warnings.append("ui_artifacts_dir_missing")
-if not html_report or not Path(html_report).is_file():
-    warnings.append("ui_html_report_missing")
-```
-
-Same check for `a11y_artifacts` when `a11y` category passed.
-
-If either missing → `status: partial` with explicit warning so user sees the regression.
-
-## 9d.3 — report-data.json schema validation (NEW)
-
+### Step 9.d.1.1 — Run regex check
 ```bash
 python3 - <<'EOF'
-import json, jsonschema, sys
+import json, re, sys
+PATTERN = re.compile(r"^tests/(unit|api|ui|security|a11y|contract)/(?:[^/]+/)+(test_[^/]+\.py|[^/]+\.(spec|test|api\.test|security\.test|contract\.test|a11y\.spec)\.(ts|js))$")
+data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
+violations = []
+for cat, cov in data.get("coverage_by_category", {}).items():
+    for p in cov.get("files", []):
+        rel = p.replace("${PROJECT_ROOT}/", "")
+        if not PATTERN.match(rel):
+            violations.append({"category": cat, "path": rel, "reason": "regex_mismatch"})
+print(json.dumps(violations))
+EOF
+```
+
+### Step 9.d.1.2 — Min file count check (catches mega-file consolidation)
+```bash
+python3 - <<'EOF'
+import json
+data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
+analysis = json.loads(open("${ANALYSIS_PATH}").read())
+
+def expected_min(cat, routes):
+    if cat in ("ui","a11y"): return 1   # snapshots-only acceptable
+    pairs = set()
+    for r in routes:
+        p = r["path"].lstrip("/")
+        if p.startswith("api/"): p = p[4:]
+        parts = [s for s in p.split("/") if s and not s.startswith("{")]
+        if not parts: parts = ["root"]
+        auth_topics = {"login","register","logout","refresh","me","reset","verify","forgot","signup","signin"}
+        domain = "auth" if parts[0] in auth_topics else parts[0]
+        tag = parts[0] if len(parts)==1 else parts[1]
+        pairs.add((domain, tag))
+    return max(1, len(pairs))
+
+mega = []
+for cat in ("api","contract"):
+    cov = data.get("coverage_by_category", {}).get(cat, {})
+    files = cov.get("files", [])
+    if cov.get("status") in ("passed","partial"):
+        m = expected_min(cat, analysis.get("routes", []))
+        if len(files) < m:
+            mega.append({"category": cat, "actual": len(files), "expected_min": m})
+print(json.dumps(mega))
+EOF
+```
+
+### Step 9.d.1.3 — Aggregate
+
+If either Step 9.d.1.1 OR Step 9.d.1.2 produced non-empty list → set `final_status = "partial"`, append `warnings.extend(["path_violation: <each>", "mega_file_consolidation: <each>"])`. Surface to user in final summary.
+
+## 9d.2 — UI/A11y artifacts existence (REQUIRED — execute via Bash)
+
+### Step 9.d.2.1 — UI artifacts (only if `ui` category status ∈ {passed, partial})
+```bash
+python3 - <<'EOF'
+import json, os, glob
+data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
+ui_cov = data.get("coverage_by_category", {}).get("ui", {})
+if ui_cov.get("status") not in ("passed","partial"):
+    print('{"skipped": "ui not run"}'); exit(0)
+
+ui = data.get("ui_artifacts") or {}
+missing = []
+if not ui.get("test_results_dir") or not os.path.isdir(ui["test_results_dir"]):
+    missing.append("ui_test_results_dir_missing")
+if not ui.get("playwright_report") or not os.path.isfile(ui["playwright_report"]):
+    missing.append("ui_playwright_report_missing")
+# proof-of-run: with --screenshot=on, every test produces ≥1 PNG.
+png_count = len(glob.glob(os.path.join(ui.get("test_results_dir") or "/dev/null", "**", "*.png"), recursive=True))
+if png_count == 0:
+    missing.append("ui_no_screenshots_captured")
+print(json.dumps(missing))
+EOF
+```
+
+### Step 9.d.2.2 — A11y artifacts (only if `a11y` category status ∈ {passed, partial})
+```bash
+python3 - <<'EOF'
+import json, os, glob
+data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
+a11y_cov = data.get("coverage_by_category", {}).get("a11y", {})
+if a11y_cov.get("status") not in ("passed","partial"):
+    print('{"skipped": "a11y not run"}'); exit(0)
+
+a = data.get("a11y_artifacts") or {}
+missing = []
+if not a.get("test_results_dir") or not os.path.isdir(a["test_results_dir"]):
+    missing.append("a11y_test_results_dir_missing")
+if not a.get("axe_report") or not os.path.isfile(a["axe_report"]):
+    missing.append("a11y_axe_report_missing")
+png_count = len(glob.glob(os.path.join(a.get("test_results_dir") or "/dev/null", "**", "*.png"), recursive=True))
+if png_count == 0:
+    missing.append("a11y_no_screenshots_captured")
+print(json.dumps(missing))
+EOF
+```
+
+### Step 9.d.2.3 — Aggregate
+
+Any non-empty `missing` list from either step → `final_status = "partial"`, append each item to `warnings`. **Zero-PNG = HARD failure** — without proof-of-run via `--screenshot=on` artifacts, the agent's pass status is unverifiable.
+
+## 9d.3 — report-data.json schema validation (REQUIRED — execute via Bash)
+
+### Step 9.d.3.1 — Run validator
+```bash
+python3 - <<'EOF'
+import json, sys
+try:
+    import jsonschema
+except ImportError:
+    print("WARN jsonschema not installed, skipping validation", file=sys.stderr); sys.exit(0)
 schema = json.loads(open("${CLAUDE_PLUGIN_ROOT}/skills/_shared/schemas/report_data.schema.json").read())
 data   = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
 try:
     jsonschema.validate(data, schema)
     print("OK")
 except jsonschema.ValidationError as e:
-    print(f"FAIL: {e.message} at {list(e.path)}", file=sys.stderr)
-    sys.exit(1)
+    print(f"FAIL: {e.message} at path {list(e.path)}", file=sys.stderr); sys.exit(1)
 EOF
 ```
 
-Failure → `status: partial` + `warnings: ["report_data_schema_violation: <message>"]`. Do NOT block run completion (run already finished); user will see the warning in the report.
+### Step 9.d.3.2 — Aggregate
+
+- exit 0 + stdout `OK` → continue.
+- exit 0 + stderr `WARN jsonschema not installed` → append `warnings: ["schema_validation_skipped: jsonschema_missing"]`.
+- exit 1 → append `warnings: ["report_data_schema_violation: <stderr>"]`, `final_status = "partial"`.
+
+Do NOT silently pass when validation fails. The user MUST see the schema breach in the final summary.
 
 ## 9e. Learnings audit-log sanity
 

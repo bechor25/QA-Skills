@@ -89,7 +89,7 @@ If source is at project root (no sub-dir) → `tests/unit/root/<file>.test.<ext>
 
 ## Path enforcement (BEFORE writing each file)
 
-Every path you emit MUST regex-match: `^tests/unit/[^/]+/.+\.(test|spec)\.(ts|js|py)$` (TS/JS/Py) OR mirror Java/C# conventions above. Validate first, then Write. If your derived path doesn't match:
+Every path you emit MUST regex-match: `^tests/unit/(?:[^/]+/)+(test_[^/]+\.py|[^/]+\.(test|spec)\.(ts|js))$` (TS/JS uses `.test.ts`/`.spec.ts`; Python uses `test_<name>.py`) OR mirror Java/C# conventions above. Validate first, then Write. If your derived path doesn't match:
 
 ```python
 # WRONG — flat

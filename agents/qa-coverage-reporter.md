@@ -117,7 +117,7 @@ def collect_artifacts(agent_output, category, project_root):
         "playwright_report" if category == "ui" else "axe_report":
             agent_output.get("html_report"),
         "test_results_dir": agent_output.get("artifacts_dir"),
-        "screenshots": [],
+        "screenshots": [],   # populated by walking test_results_dir below — proof-of-run via --screenshot=on
         "videos": [],
         "traces": [],
     }
@@ -136,6 +136,8 @@ def collect_artifacts(agent_output, category, project_root):
             art[k] = sorted(art[k])[:50]
     coverage[category]["artifacts"] = art
 ```
+
+With `--screenshot=on`, every test produces ≥1 PNG in `test_results_dir`. `screenshots[]` is the **proof-of-run** field. Empty after a passed/partial run indicates the agent did not actually execute — surface as a gap, not a successful run. Orchestrator Phase 9d.2 enforces this.
 
 Run this immediately after building each category's coverage entry. For non-ui/non-a11y categories, omit `artifacts` entirely.
 
@@ -179,13 +181,14 @@ Pass through the timeline from caller. Sort by start time. Compute total elapsed
   "ui_artifacts": {
     "playwright_report": "${PROJECT_ROOT}/tests/ui/playwright-report/index.html",
     "test_results_dir":  "${PROJECT_ROOT}/tests/ui/test-results",
-    "screenshots":       ["tests/ui/test-results/.../failure.png", "..."],
+    "screenshots":       ["tests/ui/test-results/.../test-finished-1.png", "..."],
     "videos":            ["tests/ui/test-results/.../video.webm"],
     "traces":            ["tests/ui/test-results/.../trace.zip"]
   },
   "a11y_artifacts": {
     "axe_report":       "${PROJECT_ROOT}/tests/a11y/axe-report/index.html",
-    "test_results_dir": "${PROJECT_ROOT}/tests/a11y/test-results"
+    "test_results_dir": "${PROJECT_ROOT}/tests/a11y/test-results",
+    "screenshots":      ["tests/a11y/test-results/.../test-finished-1.png", "..."]
   },
   "modules": [{"path": "...", "status": "covered|partial|uncovered|unchanged", "tests": [...]}],
   "gaps": [...],
