@@ -61,22 +61,49 @@ Generate working WCAG 2.1 AA accessibility tests for frontend pages. Pre-flight 
 
 Same as `qa-ui-test`. Skip if down.
 
-# Phase 2 — Setup
+# Phase 2 — Setup (language-aware)
 
-Verify Playwright + axe installed:
+Branch by `language`.
+
+## TS/JS branch
 ```bash
 test -d "${PROJECT_ROOT}/node_modules/@axe-core/playwright" || \
   (cd "${PROJECT_ROOT}" && npm install -D @axe-core/playwright)
 ```
+Reuse `playwright.config.ts` if present. Spec files: `tests/a11y/*.a11y.spec.ts`.
 
-Reuse `playwright.config.ts` if present.
+## Python branch
+```bash
+python3 -c "import axe_playwright_python" 2>/dev/null || \
+  (source "${PROJECT_ROOT}/.venv/bin/activate" 2>/dev/null; pip install axe-playwright-python)
+```
+Also ensure pytest-playwright + chromium are present (qa-ui-test should have installed them; verify with `python3 -c "import pytest_playwright"`). Spec files: `tests/test_a11y_*.py` using:
+```python
+from playwright.sync_api import Page
+from axe_playwright_python.sync_playwright import Axe
+
+def test_home_no_critical_violations(page: Page):
+    page.goto("/")
+    page.wait_for_load_state("load")
+    results = Axe().run(page)
+    critical = [v for v in results.response["violations"] if v["impact"] == "critical"]
+    serious  = [v for v in results.response["violations"] if v["impact"] == "serious"]
+    assert not critical, f"axe critical violations: {[v['id'] for v in critical]}"
+    assert not serious,  f"axe serious  violations: {[v['id'] for v in serious]}"
+```
+
+## Java/C# branch
+Out of scope v1 → return `status: "skipped_unsupported_language"`.
 
 # Phase 3 — Group pages
 
-Group routes by prefix:
-- `/`, `/home` → `tests/a11y/home.a11y.spec.ts`
-- `/login`, `/register` → `tests/a11y/auth.a11y.spec.ts`
-- `/dashboard`, `/settings` → `tests/a11y/dashboard.a11y.spec.ts`
+Group routes by prefix. File extension/path depends on language:
+
+| Group | TS/JS path | Python path |
+|---|---|---|
+| `/`, `/home` | `tests/a11y/home.a11y.spec.ts` | `tests/test_a11y_home.py` |
+| `/login`, `/register` | `tests/a11y/auth.a11y.spec.ts` | `tests/test_a11y_auth.py` |
+| `/dashboard`, `/settings` | `tests/a11y/dashboard.a11y.spec.ts` | `tests/test_a11y_dashboard.py` |
 
 # Phase 4 — Generate per page group
 
@@ -92,8 +119,14 @@ For full templates, Read `~/.claude/qa-skills-reference/a11y-test-patterns.md`.
 
 # Phase 5 — Run
 
+TS/JS:
 ```bash
 cd ${project_root} && npx playwright test tests/a11y --reporter=json 2>&1
+```
+
+Python:
+```bash
+cd ${project_root} && pytest tests/test_a11y_*.py -q --json-report --json-report-file=/tmp/qa-a11y-${run_id}.json 2>&1
 ```
 
 # Phase 6 — Fix loop

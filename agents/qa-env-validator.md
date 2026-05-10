@@ -76,16 +76,26 @@ If `fail` → status: error, return immediately. No tests can be generated.
 
 Branch by `language`. For each missing prerequisite, follow the `auto_install` flow (Phase 3a below).
 
-**TS/JS:**
+UI and a11y have separate (overlapping) prerequisites. Treat them as two checks. If a11y's extra prereq (axe) is missing while ui's is satisfied → keep `ui`, remove `a11y` only.
+
+**TS/JS — `ui`:**
 - Check: `test -d "${project_root}/node_modules/@playwright/test"`
 - Install cmd: `cd "${project_root}" && npm install -D @playwright/test && npx playwright install chromium`
 
-**Python:**
+**TS/JS — `a11y`** (only if `a11y` in categories):
+- Check: `test -d "${project_root}/node_modules/@axe-core/playwright"`
+- Install cmd: `cd "${project_root}" && npm install -D @axe-core/playwright`
+
+**Python — `ui`:**
 - Check: `python3 -c "import pytest_playwright" 2>/dev/null` AND `playwright --version 2>/dev/null`
-- Install cmd: `pip install pytest-playwright && playwright install chromium`
+- Install cmd: `pip install pytest-playwright pytest-html && playwright install chromium`
 - If a `.venv` exists in `project_root` → activate it first: `source "${project_root}/.venv/bin/activate" && pip install ...`
 
-**Java/C#:** UI not supported in v1 → remove `ui`, `a11y` with reason `"unsupported_language"`. No install attempt.
+**Python — `a11y`** (only if `a11y` in categories):
+- Check: `python3 -c "import axe_playwright_python" 2>/dev/null`
+- Install cmd: `pip install axe-playwright-python` (in venv if present)
+
+**Java/C#:** UI/a11y not supported in v1 → remove `ui`, `a11y` with reason `"unsupported_language"`. No install attempt.
 
 For all branches: also verify the dev server URL is configured (read `analysis.frontend_dev_server`). Missing → keep `ui` enabled but add warning `"server_url_unknown"`.
 

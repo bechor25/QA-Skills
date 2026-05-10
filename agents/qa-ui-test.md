@@ -85,6 +85,8 @@ Return ONLY this JSON object. No prose, no test code, no logs.
   ],
   "tokens_used_estimate": 42000,
   "elapsed_seconds": 180,
+  "artifacts_dir": "${PROJECT_ROOT}/test-results",
+  "html_report": "${PROJECT_ROOT}/playwright-report/index.html",
   "warnings": []
 }
 ```
@@ -172,28 +174,45 @@ Tests written to `tests/e2e/*.spec.ts`.
 
 ```bash
 python3 -c "import pytest_playwright" 2>/dev/null && echo "ok" || echo "missing"
+python3 -c "import pytest_html"        2>/dev/null && echo "ok" || echo "missing"
 ```
-Missing → `pip install pytest-playwright && playwright install chromium`.
+Missing → `pip install pytest-playwright pytest-html && playwright install chromium` (run via `${project_root}/.venv/bin/pip` if venv present).
 
-Write `tests/conftest_ui.py` (do NOT clobber existing `tests/conftest.py`) with pytest-playwright fixtures and artifact config:
+Write `tests/conftest_ui.py` (do NOT clobber existing `tests/conftest.py`) with pytest-playwright fixtures:
 ```python
 import pytest
 
 @pytest.fixture(scope="session")
 def browser_context_args(browser_context_args):
     return {**browser_context_args, "base_url": "${SERVER_URL}"}
-
-# pytest-playwright artifact CLI flags applied via pytest.ini below
 ```
 
-Append/merge into `pytest.ini` (or create) so artifacts come out automatically:
-```ini
-[pytest]
-addopts = --browser=chromium --screenshot=${options.screenshots} --video=${options.video} --tracing=${options.trace} --output=test-results
+Configure pytest **without clobbering existing config**. Decide where addopts live:
+
+```python
+if (project_root/"pytest.ini").exists():
+    target = "pytest.ini[pytest].addopts"
+elif (project_root/"pyproject.toml").exists() and "[tool.pytest.ini_options]" in pyproject.read_text():
+    target = "pyproject.toml[tool.pytest.ini_options].addopts"
+else:
+    target = "pytest.ini[pytest].addopts"   # create new pytest.ini
 ```
-If `options.headless: false` → also add `--headed`. Default headless = no flag.
+
+Required addopts to ADD (merge with existing — never overwrite):
+```
+--browser=chromium
+--screenshot=${options.screenshots}
+--video=${options.video}
+--tracing=${options.trace}
+--output=test-results
+--html=playwright-report/index.html
+--self-contained-html
+```
+If `options.headless: false` → also add `--headed`. If existing `addopts` already contains a flag → skip it (idempotent merge).
 
 Tests written to `tests/test_ui_*.py` using the `page` fixture (pytest-playwright). Do NOT use `@playwright/test` import — that is JS-only.
+
+After test run, the agent records `artifacts_dir: "${PROJECT_ROOT}/test-results"` and `html_report: "${PROJECT_ROOT}/playwright-report/index.html"` in its output JSON so coverage-reporter can link them in the report.
 
 ## Java/C# branch
 
