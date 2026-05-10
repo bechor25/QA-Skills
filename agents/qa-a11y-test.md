@@ -115,6 +115,11 @@ Verify pytest-playwright + chromium are present (env-validator owns installs; if
 ```
 `--screenshot=on` (not `only-on-failure`) — captures one PNG per test = proof every page actually rendered.
 
+> ⚠️ **HARD RULES — NO EXCEPTIONS** ⚠️
+> - `--output=tests/a11y/test-results` (NOT `test-reports/...`, NOT shared with ui — separate dir per category).
+> - `--html=tests/a11y/axe-report/index.html` (mandatory; null in return JSON = Phase 9d.2 failure).
+> - Both flags relative to `${PROJECT_ROOT}`; pytest runs with `cd ${PROJECT_ROOT}`.
+
 **Post-run artifact existence check (REQUIRED):**
 ```bash
 test -d "${PROJECT_ROOT}/tests/a11y/test-results"           || ARTIFACT_FAIL="results_dir_missing"
@@ -150,6 +155,26 @@ Group routes by their domain prefix. Derive sub-dir from the route path's first 
 | `/login`, `/register` | `tests/a11y/auth/login.a11y.spec.ts` | `tests/a11y/auth/test_login.py` |
 | `/dashboard`, `/settings` | `tests/a11y/dashboard/index.a11y.spec.ts` | `tests/a11y/dashboard/test_index.py` |
 | `/payments/checkout` | `tests/a11y/payments/checkout.a11y.spec.ts` | `tests/a11y/payments/test_checkout.py` |
+
+## Hard rule — minimum file count = N pages
+
+**Never write a single mega `test_a11y_pages.py` with all pages.** Each scanned page = its own spec file:
+
+```
+3 templates: index.html, login.html, quote.html
+→ minimum 3 spec files:
+  tests/a11y/pages/test_home.py
+  tests/a11y/pages/test_login.py
+  tests/a11y/pages/test_quote.py
+```
+
+Bad (rejected):
+```
+tests/a11y/pages/test_a11y_pages.py     # mega-file, all pages in one
+tests/a11y/test_all.py                  # flat
+```
+
+Orchestrator Phase 9d.1.2 rejects fewer files than `min(len(unique_pages), 10)`.
 
 # Phase 4 — Generate per page group
 

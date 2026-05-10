@@ -160,6 +160,15 @@ Pass through the timeline from caller. Sort by start time. Compute total elapsed
 
 # Phase 5 — Build report-data.json
 
+> ⚠️⚠️⚠️ **BLOCKING** ⚠️⚠️⚠️
+>
+> `version` MUST be the literal string `"2.0"`. Not `"1.0"`. Not `"v2"`. Not omitted. Schema enforces `const: "2.0"` — anything else fails Phase 9d.3 validation.
+>
+> `ui_artifacts.test_results_dir` MUST be `"${PROJECT_ROOT}/tests/ui/test-results"` (NOT `test-reports/...`).
+> `a11y_artifacts.test_results_dir` MUST be `"${PROJECT_ROOT}/tests/a11y/test-results"` (NOT shared with ui).
+> `ui_artifacts.playwright_report` MUST be a real file path (`tests/ui/playwright-report/index.html`), NOT null when ui ran.
+> `a11y_artifacts.axe_report` MUST be a real file path (`tests/a11y/axe-report/index.html`), NOT null when a11y ran.
+
 ```json
 {
   "version": "2.0",

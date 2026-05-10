@@ -176,7 +176,12 @@ tests/test_security.py                            # flat, mega-file
 tests/security/test_all.py                        # mega-file under correct root
 tests/security/routes/test_routes_security.py     # source-file domain — WRONG
 sample_app/tests/test_security.py                 # wrong root
+tests/security/users/test_admin_security.py       # /admin lives under ADMIN, not USERS
 ```
+
+## Hard rule — folder = route first-segment, ONE-TO-ONE
+
+Each unique first-segment of route.path = own top-level folder under `tests/security/`. Never group `/users` tests inside `/admin` folder. Orchestrator Phase 9d.1.2 flags as `domain_folder_mismatch`.
 
 ## Path enforcement (BEFORE writing each file)
 

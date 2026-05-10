@@ -216,6 +216,12 @@ Invoke `qa-code-analyzer` via Task tool. Pass `RunContext`. Agent writes `analys
 
 ## Phase 1a — Validate analyzer output (REQUIRED — execute every step)
 
+> ⚠️⚠️⚠️ **BLOCKING — MUST EXECUTE VIA Bash TOOL** ⚠️⚠️⚠️
+>
+> Every code block in this Phase is a **command you MUST run with the Bash tool**, not pseudocode to summarize. If you skip the Bash invocations, the orchestrator violates its own contract and the run is **invalid**.
+>
+> Compliance check: at end of Phase 1a, verify your message log contains the bash commands above with their actual stdout. If absent → re-do Phase 1a from Step 1.a.1 before continuing.
+
 **This is not a description. Execute each step in order via the Bash tool. Do not skip. Do not summarize.**
 
 ### Step 1.a.1 — Read analysis.json
@@ -725,6 +731,12 @@ test -f "${PROJECT_ROOT}/${path}" || FAIL("missing on disk: ${path}")
 
 ## 9d.1 — Path contract enforcement (REQUIRED — execute every step)
 
+> 🚨🚨🚨 **BLOCKING GATE — MUST RUN VIA Bash TOOL** 🚨🚨🚨
+>
+> Phase 9 gates 9d.1, 9d.2, 9d.3 are **the only thing standing between a false-green run and a real one**. Each `python3 - <<'EOF' ... EOF` block below is a **bash command you MUST execute** with the Bash tool — not pseudocode, not "would-run", not "the orchestrator should". You ARE the orchestrator. Run them.
+>
+> If your final return JSON has `status: completed` but Phase 9 bash logs are absent from your message history, you produced a **lie**. Re-run Phase 9 from Step 9.d.1.1 before returning.
+
 **Execute via Bash. Do not skip. Do not summarize.** Capture stdout into `gate_9d1_violations`.
 
 ### Step 9.d.1.1 — Run regex check
@@ -750,10 +762,21 @@ import json
 data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
 analysis = json.loads(open("${ANALYSIS_PATH}").read())
 
-def expected_min(cat, routes):
-    if cat in ("ui","a11y"): return 1   # snapshots-only acceptable
+def is_api_route(r):
+    """Distinguish JSON/API routes from SSR HTML page routes.
+    Page routes (GET / with no auth, returning HTML) inflate api/contract expected_min."""
+    if r.get("path","").startswith("/api/"): return True
+    if r.get("method","GET").upper() not in ("GET","HEAD"): return True
+    if r.get("requires_auth"): return True
+    if r.get("path","").endswith(".json"): return True
+    return False
+
+def expected_min_routes(routes):
+    """For api/security/contract — min files = unique (domain, tag) pairs from API routes only.
+    Filters out SSR page routes (`/`, `/login` rendering HTML) that don't represent api endpoints."""
+    api_routes = [r for r in routes if is_api_route(r)]
     pairs = set()
-    for r in routes:
+    for r in api_routes:
         p = r["path"].lstrip("/")
         if p.startswith("api/"): p = p[4:]
         parts = [s for s in p.split("/") if s and not s.startswith("{")]
@@ -764,21 +787,76 @@ def expected_min(cat, routes):
         pairs.add((domain, tag))
     return max(1, len(pairs))
 
+def expected_min_pages(frontend_files):
+    """For ui/a11y — min files = unique pages (templates / SPA routes)."""
+    pages = [f for f in frontend_files if isinstance(f, str) and (f.endswith(".html") or f.endswith(".tsx") or f.endswith(".jsx") or f.endswith(".vue"))]
+    if not pages: return 1
+    return max(1, min(len(pages), 10))   # cap at 10 to avoid absurd minimums on huge SPAs
+
 mega = []
-for cat in ("api","contract"):
+mismatches = []
+routes = analysis.get("routes", [])
+fe = analysis.get("frontend_files", [])
+
+import re as _re
+def _allowed_pairs_for_routes(api_routes):
+    """Build (domain, tag) pairs that legitimately exist per analysis.routes."""
+    pairs = set()
+    auth_topics = {"login","register","logout","refresh","me","reset","verify","forgot","signup","signin"}
+    for r in api_routes:
+        p = r["path"].lstrip("/")
+        if p.startswith("api/"): p = p[4:]
+        parts = [s for s in p.split("/") if s and not s.startswith("{")]
+        if not parts: parts = ["root"]
+        domain = "auth" if parts[0] in auth_topics else parts[0]
+        tag = parts[0] if len(parts)==1 else parts[1]
+        pairs.add((domain, tag))
+        pairs.add((domain, domain))   # also allow tests/<cat>/<domain>/test_<domain>.py
+    return pairs
+
+def folder_mismatch(cat, files, allowed_pairs):
+    """Flag tests/<cat>/<folder>/test_<stem>.py whose (folder, stem) isn't in allowed_pairs."""
+    bad = []
+    for p in files:
+        m = _re.match(rf"^tests/{cat}/([^/]+)/test_([^_/]+)(?:_[^/]+)?\.py$", p)
+        if not m: continue
+        folder, stem = m.group(1), m.group(2)
+        if (folder, stem) in allowed_pairs: continue
+        bad.append({"category": cat, "path": p, "folder": folder, "stem": stem})
+    return bad
+
+_api_routes = [r for r in routes if is_api_route(r)]
+_pairs = _allowed_pairs_for_routes(_api_routes)
+
+for cat in ("api","contract","security"):
     cov = data.get("coverage_by_category", {}).get(cat, {})
     files = cov.get("files", [])
     if cov.get("status") in ("passed","partial"):
-        m = expected_min(cat, analysis.get("routes", []))
+        m = expected_min_routes(routes)
         if len(files) < m:
             mega.append({"category": cat, "actual": len(files), "expected_min": m})
-print(json.dumps(mega))
+        mismatches.extend(folder_mismatch(cat, files, _pairs))
+
+for cat in ("ui","a11y"):
+    cov = data.get("coverage_by_category", {}).get(cat, {})
+    files = cov.get("files", [])
+    if cov.get("status") in ("passed","partial"):
+        m = expected_min_pages(fe)
+        if len(files) < m:
+            mega.append({"category": cat, "actual": len(files), "expected_min": m})
+
+print(json.dumps({"mega": mega, "domain_folder_mismatches": mismatches}))
 EOF
 ```
 
 ### Step 9.d.1.3 — Aggregate
 
-If either Step 9.d.1.1 OR Step 9.d.1.2 produced non-empty list → set `final_status = "partial"`, append `warnings.extend(["path_violation: <each>", "mega_file_consolidation: <each>"])`. Surface to user in final summary.
+If Step 9.d.1.1 OR `mega` OR `domain_folder_mismatches` produced any entries → set `final_status = "partial"`, append:
+- `warnings.append(f"path_violation: {p}")` per entry from 9.d.1.1
+- `warnings.append(f"mega_file_consolidation: {cat} actual={n} expected_min={m}")` per `mega`
+- `warnings.append(f"domain_folder_mismatch: {p} (folder={folder}, stem={stem})")` per `mismatches`
+
+Surface all to user in final summary so they see exactly which files violate which rule.
 
 ## 9d.2 — UI/A11y artifacts existence (REQUIRED — execute via Bash)
 

@@ -218,6 +218,11 @@ Required CLI flags for every UI pytest invocation:
 ```
 If `options.headless: false` → also add `--headed`.
 
+> ⚠️ **HARD RULES — NO EXCEPTIONS** ⚠️
+> - `--output=tests/ui/test-results` (NOT `test-reports/ui-test-results` — that pollutes the report dir).
+> - `--html=tests/ui/playwright-report/index.html` (mandatory; null in return JSON = Phase 9d.2 failure).
+> - Both flags relative to `${PROJECT_ROOT}`; pytest runs with `cd ${PROJECT_ROOT}` so paths resolve correctly.
+
 Tests written to `${PROJECT_ROOT}/tests/ui/<domain>/test_*.py` using the `page` fixture (pytest-playwright). Do NOT use `@playwright/test` import — that is JS-only. Smoke spec → `${PROJECT_ROOT}/tests/ui/test_smoke.py` (root, not domain-scoped). Auth flow → `${PROJECT_ROOT}/tests/ui/auth/test_login.py`. Domain sub-dirs derived per Phase 3.5.
 
 **Hard rules — Python branch path enforcement:**
@@ -308,6 +313,35 @@ Spec path layout:
 - Python: `tests/ui/{subdir}/test_{snake_name}.py`
 
 `smoke` and global a11y always live at the root (`tests/ui/e2e/smoke.spec.ts` / `tests/ui/test_smoke.py`).
+
+## Hard rule — minimum file count = N pages
+
+**Never write a single mega `test_ui_pages.py` with all flows.**
+
+Count unique pages from the recon (`Phase 3` output) or `analysis.frontend_files`. Each page = its own spec file:
+
+```
+3 templates: index.html, login.html, quote.html
+→ minimum 3 spec files:
+  tests/ui/pages/test_home.py        (covers index.html)
+  tests/ui/pages/test_login.py       (covers login.html)
+  tests/ui/pages/test_quote.py       (covers quote.html)
+```
+
+Bad (rejected):
+```
+tests/ui/pages/test_ui_pages.py     # mega-file, all 3 pages in one
+tests/ui/test_all.py                # flat
+```
+
+Good:
+```
+tests/ui/pages/test_home.py
+tests/ui/pages/test_login.py
+tests/ui/pages/test_quote.py
+```
+
+Orchestrator Phase 9d.1.2 rejects fewer files than `min(len(unique_pages), 10)`.
 
 # Phase 4 — Smoke batch
 

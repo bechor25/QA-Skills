@@ -181,7 +181,17 @@ tests/test_api.py                                # flat, mega-file
 tests/api/test_all.py                            # mega-file under correct root
 tests/api/routes/test_routes_api.py              # source-file domain (route.py → routes/) — WRONG
 sample_app/tests/test_api.py                     # wrong root
+tests/api/users/test_health_api.py               # /api/health lives under HEALTH, not USERS
+tests/api/auth/test_calc_api.py                  # /api/calc/quote lives under CALC, not AUTH
 ```
+
+## Hard rule — folder = first segment of route, ONE-TO-ONE
+
+`/api/users` → `tests/api/users/...`
+`/api/health` → `tests/api/health/...` (its own folder, NOT inside users/)
+`/api/calc/quote` → `tests/api/calc/...` (its own folder, NOT inside calc-as-subdir-of-something)
+
+**Never** group two distinct first-segments into the same folder. Each first-segment route domain = its own top-level folder under `tests/api/`. The orchestrator Phase 9d.1.2 flags `tests/api/<X>/test_<Y>_api.py` when X≠Y as path violation `domain_folder_mismatch`.
 
 ## Path enforcement (BEFORE writing each file)
 

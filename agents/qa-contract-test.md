@@ -137,7 +137,12 @@ tests/test_contract.py                          # flat, mega-file
 tests/contract/test_all.py                      # mega-file under correct root
 tests/contract/api/test_api_contract.py         # /api/ used as domain — WRONG, strip /api/ first
 sample_app/tests/test_contract.py               # wrong root
+tests/contract/users/test_health_contract.py    # /api/health lives under HEALTH, not USERS
 ```
+
+## Hard rule — folder = route first-segment (after stripping /api/), ONE-TO-ONE
+
+Each unique first-segment = own top-level folder under `tests/contract/`. Never nest unrelated domains. Orchestrator Phase 9d.1.2 flags as `domain_folder_mismatch`.
 
 ## Path enforcement (BEFORE writing each file)
 
