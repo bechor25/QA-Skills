@@ -111,8 +111,39 @@ Behavior on priors:
 1. **Pre-flight required.** No server → `skipped_no_server`.
 2. **Never weaken assertions to make tests pass.** A failing security test = real vuln. Document in `vulnerabilities_found`.
 3. Only generate tests for categories where signals exist (no generic test spam).
-4. Group by domain sub-dir + category: `tests/security/{domain}/{category}.security.test.*`. Domain = first path segment of the route the test exercises (or `src/` sub-dir of the module). Examples: `tests/security/auth/injection.security.test.py`, `tests/security/payments/idor.security.test.ts`, `tests/security/admin/auth.security.test.py`. Group files by domain so testers can scan one folder per feature.
+4. Group by domain sub-dir + category: `${project_root}/tests/security/{domain}/{category}.security.test.*`. Domain = first path segment of the route the test exercises (after stripping `/api/` prefix), or `src/`/`app/` sub-dir of the module. Examples below.
 5. Max 2 fix iterations.
+
+# Output paths (REQUIRED layout)
+
+Tests live under **`${project_root}/tests/security/`**. **Never under sub-packages** (e.g. `sample_app/tests/`). **Never flat.** **Never one mega `test_security.py`.**
+
+```
+tests/security/{domain}/{category}.security.test.{ext}
+
+POST /auth/login   + injection signal     → tests/security/auth/test_injection.py
+POST /auth/login   + auth signal          → tests/security/auth/test_auth.py
+POST /auth/login   + timing signal        → tests/security/auth/test_timing.py
+GET  /users/:id    + idor signal          → tests/security/users/test_idor.py
+POST /users        + mass_assignment      → tests/security/users/test_mass_assignment.py
+POST /payments/charge + xss               → tests/security/payments/test_xss.py
+GET  /admin/users  + privilege_escalation → tests/security/admin/test_privilege.py
+```
+
+ONE file per `{domain}/{category}` combo. Multiple categories on same domain → multiple files. Multiple routes within same `{domain}/{category}` → group into one file.
+
+## Hard rule — NEVER mega-file
+
+Bad (rejected):
+```
+tests/test_security.py                  # flat, mega-file
+tests/security/test_all.py              # mega-file under correct root
+sample_app/tests/test_security.py       # wrong root
+```
+
+## Path enforcement (BEFORE writing each file)
+
+Every path MUST regex-match: `^tests/security/[^/]+/.+\.(security\.test|test)\.(ts|js|py)$`. Validate before Write. If `path_contract.required_pattern` provided in input, use that.
 
 # Phase 1 — Pre-flight
 

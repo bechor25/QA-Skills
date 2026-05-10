@@ -75,7 +75,9 @@ Branch by `language`.
 test -d "${PROJECT_ROOT}/node_modules/@axe-core/playwright" || \
   (cd "${PROJECT_ROOT}" && npm install -D @axe-core/playwright)
 ```
-Spec files: `tests/a11y/<domain>/*.a11y.spec.ts` (domain = first segment of route, see Phase 3). Do NOT reuse `playwright.config.ts` (its `testDir` is `tests/ui/e2e` — would miss a11y specs). Write a separate `playwright.a11y.config.ts` with `testDir: './tests/a11y'` and reporter pinned to `tests/a11y/`:
+Spec files: `${PROJECT_ROOT}/tests/a11y/<domain>/*.a11y.spec.ts` (domain = first segment of route, see Phase 3). **Never under sub-packages.** **Never flat under `tests/a11y/`.** Path regex: `^tests/a11y/[^/]+/.+\.a11y\.spec\.ts$`. Validate before Write.
+
+Do NOT reuse `playwright.config.ts` (its `testDir` is `tests/ui/e2e` — would miss a11y specs). Write a separate `playwright.a11y.config.ts` with `testDir: './tests/a11y'` and reporter pinned to `tests/a11y/`:
 ```bash
 cd "${PROJECT_ROOT}" && npx playwright test tests/a11y \
   --reporter=json,html \
@@ -90,7 +92,32 @@ Recommended: write `playwright.a11y.config.ts` once (extends `playwright.config.
 python3 -c "import axe_playwright_python" 2>/dev/null || \
   (source "${PROJECT_ROOT}/.venv/bin/activate" 2>/dev/null; pip install axe-playwright-python)
 ```
-Verify pytest-playwright + chromium are present (env-validator owns installs; if missing → return error `pytest_playwright_missing_after_env_validator`). Create `tests/a11y/<domain>/` sub-dirs (per Phase 3). Write `tests/a11y/conftest.py` with the same `browser_context_args` fixture as qa-ui-test (independent conftest — does NOT depend on tests/ui/conftest.py). Spec files: `tests/a11y/<domain>/test_*.py` using:
+Verify pytest-playwright + chromium are present (env-validator owns installs; if missing → return error `pytest_playwright_missing_after_env_validator`). Create `${PROJECT_ROOT}/tests/a11y/<domain>/` sub-dirs (per Phase 3). Write `${PROJECT_ROOT}/tests/a11y/conftest.py` with the same `browser_context_args` fixture as qa-ui-test (independent conftest — does NOT depend on tests/ui/conftest.py). Spec files: `${PROJECT_ROOT}/tests/a11y/<domain>/test_*.py`.
+
+**Hard rules — Python branch path enforcement:**
+- Tests live ONLY under `${PROJECT_ROOT}/tests/a11y/`. NEVER under sub-packages like `${PROJECT_ROOT}/sample_app/tests/`.
+- NEVER write a single mega `test_a11y.py` flat. Every spec is `tests/a11y/<domain>/test_<page>.py`.
+- Path regex: `^tests/a11y/[^/]+/test_.+\.py$`. Validate before Write.
+
+**Required pytest CLI flags (every a11y invocation):**
+```
+--browser=chromium
+--screenshot=only-on-failure
+--video=retain-on-failure
+--tracing=retain-on-failure
+--output=tests/a11y/test-results
+--html=tests/a11y/axe-report/index.html
+--self-contained-html
+```
+
+**Post-run artifact existence check (REQUIRED):**
+```bash
+test -d "${PROJECT_ROOT}/tests/a11y/test-results"           || ARTIFACT_FAIL="results_dir_missing"
+test -f "${PROJECT_ROOT}/tests/a11y/axe-report/index.html"  || ARTIFACT_FAIL="html_report_missing"
+```
+If either missing → `warnings: ["${ARTIFACT_FAIL}"]` AND set `artifacts_dir: null` / `html_report: null` in return JSON. Coverage-reporter Phase 2.5 keys off these fields.
+
+Spec body template:
 ```python
 from playwright.sync_api import Page
 from axe_playwright_python.sync_playwright import Axe

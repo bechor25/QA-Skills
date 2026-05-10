@@ -74,14 +74,35 @@ Else → mode `golden_capture` (first run, capture and save).
 
 # Phase 2.5 — Output paths (domain sub-dirs)
 
+Tests live under **`${project_root}/tests/contract/`**. **Never under sub-packages** (e.g. `sample_app/tests/`). **Never flat.** **Never one mega `test_contract.py`.**
+
 ```
 tests/contract/{domain}/{tag}.contract.test.{ext}
 
-GET  /users/:id          → tests/contract/users/users.contract.test.ts
+GET  /users/:id          → tests/contract/users/users.contract.test.ts   (Py: tests/contract/users/test_users.py)
 POST /payments/charge    → tests/contract/payments/charge.contract.test.ts
+GET  /api/health         → tests/contract/health/test_health.py          (strip "/api/" prefix)
+POST /api/calc/quote     → tests/contract/calc/test_quote.py
+POST /api/login          → tests/contract/auth/test_login.py
+GET  /api/me             → tests/contract/auth/test_me.py
 ```
 
-Group routes sharing `{domain}/{tag}` into one file. Python: `tests/contract/{domain}/test_{tag}.py`.
+Routes sharing same `{domain}/{tag}` → ONE file. Different tags within same domain → SEPARATE files. Python: `tests/contract/{domain}/test_{tag}.py`.
+
+## Hard rule — NEVER mega-file
+
+ONE file per `{domain}/{tag}`. Minimum file count = number of distinct `{domain}/{tag}` combinations.
+
+Bad (rejected):
+```
+tests/test_contract.py                  # flat, mega-file
+tests/contract/test_all.py              # mega-file under correct root
+sample_app/tests/test_contract.py       # wrong root
+```
+
+## Path enforcement (BEFORE writing each file)
+
+Every path MUST regex-match: `^tests/contract/[^/]+/.+\.(contract\.test|test)\.(ts|js|py)$`. Validate before Write. If `path_contract.required_pattern` provided in input, use that.
 
 # Phase 3 — Generate
 

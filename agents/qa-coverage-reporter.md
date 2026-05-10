@@ -198,6 +198,32 @@ Pass through the timeline from caller. Sort by start time. Compute total elapsed
 
 Promote `coverage[ui].artifacts` and `coverage[a11y].artifacts` (set in Phase 2.5) to top-level `ui_artifacts` / `a11y_artifacts` for the html-reporter to consume directly. Keep them under `coverage_by_category` too — duplicate intentionally so per-category renderer also has them.
 
+## Phase 5a — Required-fields self-check (BEFORE write)
+
+Schema (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/schemas/report_data.schema.json`) requires these top-level fields. Verify ALL are present and non-null/empty in your built dict before writing:
+
+```python
+required = ["version","run_id","project_root","language","locale",
+            "generated_at","quality_score","summary","coverage_by_category",
+            "vulnerabilities_found","ui_artifacts","a11y_artifacts"]
+missing = [k for k in required if k not in report_data]
+if missing:
+    # Backfill from inputs rather than skip — every field has a known source:
+    #   version          -> "2.0"
+    #   run_id           -> RunContext.run_id
+    #   project_root     -> RunContext.project_root
+    #   language         -> analysis.language
+    #   locale           -> RunContext.user_locale
+    #   generated_at     -> datetime.utcnow().isoformat()+"Z"
+    #   quality_score    -> from Phase 7 (input)
+    #   ui_artifacts     -> from coverage[ui].artifacts (or null if no UI agent ran)
+    #   a11y_artifacts   -> from coverage[a11y].artifacts (or null if no a11y agent ran)
+    #   vulnerabilities_found -> aggregated from all_test_outputs[].outputs[].vulnerabilities_found[]
+    raise RuntimeError(f"BUG: built report-data.json missing required fields {missing}")
+```
+
+If a UI/a11y agent did not run (skipped or never invoked), set `ui_artifacts: null` / `a11y_artifacts: null` (NOT omit — schema requires the key). Do NOT make up paths.
+
 Write to `${project_root}/test-reports/report-data.json`.
 
 # Phase 5.5 — Persist learnings

@@ -1,7 +1,7 @@
 ---
 name: qa-code-analyzer
 description: Scan a codebase and produce structured JSON metadata (modules, routes, frontend files, stats, warnings). Writes output to disk and returns a small summary. Used as Phase 1 of the QA flow.
-model: haiku
+model: sonnet
 tools: Bash, Read, Write, Grep, Glob
 ---
 
@@ -146,9 +146,9 @@ Flag at top level (`warnings[]` array of short string codes):
 - `hardcoded_secret` — `api.key = "..."` patterns.
 - `async_handler_detected` — (Python only) any route handler defined with `async def`. Triggers `pytest-asyncio` install in env-validator.
 
-# Phase 5 — Output
+# Phase 5 — Output (STRICT SCHEMA — no creativity)
 
-Write full JSON to `${analysis_path}`:
+Write full JSON to `${analysis_path}`. **The shape below is exact and exhaustive.** Do not add fields not listed. Do not change `modules` to a dict. Do not invent `source_root`, `framework`, `python_async_detected`, per-module `routes`/`is_frontend`. Anything async-related goes in the `warnings` array as a code string, never as a top-level boolean.
 
 ```json
 {
@@ -172,9 +172,9 @@ Write full JSON to `${analysis_path}`:
       "input_fields": ["email", "password"]
     }
   ],
-  "routes": [{"method": "POST", "path": "/auth/login", "handler": "loginUser", "file": "...", "requires_auth": false}],
+  "routes": [{"method": "POST", "path": "/auth/login", "handler": "loginUser", "file": "src/routes/auth.ts", "requires_auth": false}],
   "frontend_files": [{"path": "src/components/LoginForm.tsx", "hash": "...", "kind": "spa_component | ssr_template | static_html", "has_forms": true}],
-  "stats": {"total_files": 42, "by_type": {...}, "has_auth": true, "has_db": true, "has_api": true, "has_frontend": true},
+  "stats": {"total_files": 42, "has_auth": true, "has_db": true, "has_api": true, "has_frontend": true, "total_modules": 28, "backend_modules": 22, "frontend_modules": 6},
   "external_integrations": [],
   "uploads": [],
   "graphql": null,
@@ -182,6 +182,25 @@ Write full JSON to `${analysis_path}`:
   "warnings": []
 }
 ```
+
+## Field-by-field rules
+
+- `modules` — ARRAY (not dict/object). Each element has exactly the 9 keys above. No `routes` per module. No `is_frontend` per module. Type field tells frontend vs backend (`type: "frontend"` for frontend modules; everything else is backend).
+- `routes` — ARRAY of `{method, path, handler, file, requires_auth}`. All 5 keys mandatory per element. `handler` = function name string. `file` = relative path. `requires_auth` = boolean (true if route has decorator/middleware indicating auth).
+- `project_root` — single value, the absolute path the orchestrator passed in. Do NOT add `source_root` even if you detect a sub-package (e.g. `sample_app/`). The orchestrator has its own logic for that.
+- `warnings` — ARRAY of short string codes from the enum in Phase 4. Examples: `["unauthenticated_db_route", "async_handler_detected"]`. Never a free-form sentence.
+- `frontend_dev_server` / `backend_dev_server` — string URL or null. Never both null when `has_frontend: true`.
+- `stats.total_modules` / `stats.backend_modules` / `stats.frontend_modules` — integer counts derived from `modules[]` (downstream consumers rely on these).
+
+## Forbidden fields (will be stripped by orchestrator and trigger warning)
+
+- `source_root` — orchestrator owns project_root; sub-packages discovered here mislead test-gen agents.
+- `framework` — too coarse; downstream uses route patterns + dep signals instead.
+- `python_async_detected` — emit `"async_handler_detected"` in `warnings[]` instead.
+- Any per-module `routes`, `is_frontend`, `kind` keys not listed above.
+- Any free-form description fields.
+
+If you are tempted to add a field for "extra context", DO NOT. The schema is a contract; downstream agents will not read it.
 
 Then return small summary JSON (see Output section).
 
@@ -191,3 +210,4 @@ Then return small summary JSON (see Output section).
 - Skip files that cannot be read; add to `skipped_files` array.
 - Warn if total source files < 3.
 - Use efficient bulk operations (Glob + batch Read) instead of one-file-at-a-time when possible.
+- Output JSON shape is FIXED (see Phase 5). Do not invent fields. Orchestrator validates and rejects unknown keys.

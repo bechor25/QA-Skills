@@ -214,6 +214,47 @@ Write checkpoint after every phase:
 
 Invoke `qa-code-analyzer` via Task tool. Pass `RunContext`. Agent writes `analysis.json` to `${logs_dir}/analysis.json` and returns a small summary (counts, language, paths). Update `RunContext.language` from result.
 
+## Phase 1a — Validate analyzer output (REQUIRED)
+
+After code-analyzer returns, read `analysis.json` and validate shape. Reject creativity:
+
+```python
+import json
+data = json.loads(open(analysis_path).read())
+
+# Schema enforcement
+required_top = ["language","scanned_at","project_root","frontend_kind","modules","routes","frontend_files","stats","warnings"]
+forbidden_top = ["source_root","framework","python_async_detected","effective_project_root"]
+
+# 1. Required top-level keys
+missing = [k for k in required_top if k not in data]
+# 2. Forbidden invented keys → strip + warn
+stripped = []
+for k in forbidden_top:
+    if k in data:
+        stripped.append(k)
+        del data[k]
+# 3. modules MUST be array
+if not isinstance(data.get("modules"), list):
+    abort = "analyzer_modules_not_array"
+# 4. routes MUST be array of {method, path, handler, file, requires_auth}
+route_keys = {"method","path","handler","file","requires_auth"}
+for r in data.get("routes", []):
+    if not route_keys.issubset(r.keys()):
+        warnings.append(f"route_missing_keys: {route_keys - r.keys()}")
+# 5. project_root MUST equal RunContext.project_root
+if data.get("project_root") != run_context["project_root"]:
+    data["project_root"] = run_context["project_root"]
+    warnings.append("project_root_overridden_to_runcontext")
+
+# Re-write analysis.json with stripped/normalized data
+open(analysis_path, "w").write(json.dumps(data, indent=2))
+```
+
+If `missing` non-empty OR `modules` not array → re-invoke code-analyzer ONCE with explicit format reminder appended to prompt: `"Your previous output had: <issues>. Re-emit STRICTLY matching the Phase 5 template. modules MUST be a JSON array, not a dict."` Still bad → abort with `status: error, reason: "code_analyzer_schema_violation"`.
+
+If `stripped` non-empty → emit user-visible warning: `🔍 qa-code-analyzer | stripped invented fields: {stripped}`.
+
 Then invoke `qa-git-diff-analyzer`. It updates `analysis.json` in-place (adds `diff_class` per module). Returns counts.
 
 Then invoke `qa-env-validator`. Pass top-level fields (do NOT bury inside `options`):
@@ -367,6 +408,28 @@ Pass each agent: full RunContext + agent-specific slice + the agent's priors sli
 | qa-a11y-test     | `{a11y:     RunContext.priors.a11y}` |
 
 Each agent receives ONLY its own category. Never pass the full `priors` map. Slice is `[]` when empty — agents must handle missing/empty gracefully.
+
+## Path contract (passed to every test-gen agent)
+
+Every Task invocation to a test-gen agent MUST include a `path_contract` block in the JSON input. Hard rule for the agent: violate → orchestrator deletes the file and marks output `error`.
+
+```json
+"path_contract": {
+  "project_root": "${RunContext.project_root}",
+  "test_root": "${RunContext.project_root}/tests",
+  "category_root": "${RunContext.project_root}/tests/<category>",
+  "required_pattern": "^tests/(unit|api|ui|security|a11y|contract)/[^/]+/.+\\.(spec|test|api\\.test|security\\.test|contract\\.test|a11y\\.spec)\\.(ts|js|py)$",
+  "rules": [
+    "ALL test files MUST live under ${project_root}/tests/<category>/<domain>/.",
+    "Never write tests anywhere else — not under ${project_root}/sample_app/, not under any sub-package, not flat in ${project_root}/tests/.",
+    "Domain sub-dir mandatory. Derive from source module path: drop common roots (src/, app/, lib/, pages/, templates/, views/, frontend/), use first remaining segment.",
+    "One file per domain (per resource tag). Never one mega-file per agent.",
+    "Ignore any 'source_root' or 'framework' field if it appears in analysis.json — it does not exist by spec."
+  ]
+}
+```
+
+Agents that emit `outputs[i].path` not matching `required_pattern` get the file deleted and the output rejected. Orchestrator surfaces this as `warnings: ["path_violation: <path>"]` and counts the agent as `partial`.
 
 For `qa-ui-test`:
 ```json
@@ -527,6 +590,66 @@ For every `path` in any `coverage_by_category[*].files`:
 test -f "${PROJECT_ROOT}/${path}" || FAIL("missing on disk: ${path}")
 ```
 
+## 9d.1 — Path contract enforcement (NEW)
+
+For every reported test path, regex-match against `path_contract.required_pattern`:
+
+```python
+import re
+PATTERN = re.compile(r"^tests/(unit|api|ui|security|a11y|contract)/[^/]+/.+\.(spec|test|api\.test|security\.test|contract\.test|a11y\.spec)\.(ts|js|py)$")
+violations = []
+for cat, cov in report_data["coverage_by_category"].items():
+    for p in cov.get("files", []):
+        rel = p.replace(project_root + "/", "")
+        if not PATTERN.match(rel):
+            violations.append(rel)
+if violations:
+    warnings.append(f"path_violations: {violations}")
+    # Mark `status: partial` — flat or wrong-root paths leaked through.
+```
+
+Common violations to catch:
+- `tests/test_unit_auth.py` (flat, no category dir, no domain dir)
+- `sample_app/tests/...` (wrong root — sub-package leak)
+- `tests/api.test.py` (mega-file, no domain dir)
+
+## 9d.2 — UI/A11y artifacts existence (NEW)
+
+If `coverage_by_category.ui` exists AND status in `("passed","partial")`:
+
+```python
+ui_art = report_data.get("ui_artifacts") or {}
+results_dir = ui_art.get("test_results_dir")
+html_report = ui_art.get("playwright_report")
+
+if not results_dir or not Path(results_dir).is_dir():
+    warnings.append("ui_artifacts_dir_missing")
+if not html_report or not Path(html_report).is_file():
+    warnings.append("ui_html_report_missing")
+```
+
+Same check for `a11y_artifacts` when `a11y` category passed.
+
+If either missing → `status: partial` with explicit warning so user sees the regression.
+
+## 9d.3 — report-data.json schema validation (NEW)
+
+```bash
+python3 - <<'EOF'
+import json, jsonschema, sys
+schema = json.loads(open("${CLAUDE_PLUGIN_ROOT}/skills/_shared/schemas/report_data.schema.json").read())
+data   = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
+try:
+    jsonschema.validate(data, schema)
+    print("OK")
+except jsonschema.ValidationError as e:
+    print(f"FAIL: {e.message} at {list(e.path)}", file=sys.stderr)
+    sys.exit(1)
+EOF
+```
+
+Failure → `status: partial` + `warnings: ["report_data_schema_violation: <message>"]`. Do NOT block run completion (run already finished); user will see the warning in the report.
+
 ## 9e. Learnings audit-log sanity
 
 Verify coverage-reporter's Phase 5.5 actually wrote what it claimed. Read the agent's `learnings_summary` from its return value (added in Phase 8):
@@ -558,7 +681,7 @@ if log_path and Path(log_path).exists():
 
 Drift / corruption → `warnings`, not abort. Learnings is advisory; never block a run on memory issues.
 
-Mark checkpoint `completed: true` only after 9a–9d pass clean. Otherwise `partial`. (9e adds warnings only.)
+Mark checkpoint `completed: true` only after 9a–9d.3 pass clean. Otherwise `partial`. (9e adds warnings only.)
 
 # Final summary (printed to caller)
 

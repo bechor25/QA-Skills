@@ -172,9 +172,16 @@ export default defineConfig({
 });
 ```
 
-Tests written to `tests/ui/e2e/<domain>/*.spec.ts` (domain sub-dir mirrors `src/<domain>/` of the page/component under test — see Phase 3.5 for derivation). Artifacts (screenshots, traces, videos, HTML report) written to `tests/ui/test-results/` and `tests/ui/playwright-report/`.
+Tests written to `${PROJECT_ROOT}/tests/ui/e2e/<domain>/*.spec.ts` (domain sub-dir mirrors `src/<domain>/` of the page/component under test — see Phase 3.5 for derivation). **Never under sub-packages.** **Never flat under `tests/ui/e2e/`.** Path regex: `^tests/ui/e2e/(smoke\.spec\.ts|[^/]+/.+\.spec\.ts)$`. Artifacts (screenshots, traces, videos, HTML report) written to `tests/ui/test-results/` and `tests/ui/playwright-report/`.
 
 After test run, the agent records `artifacts_dir: "${PROJECT_ROOT}/tests/ui/test-results"` and `html_report: "${PROJECT_ROOT}/tests/ui/playwright-report/index.html"` in its output JSON.
+
+**Post-run artifact existence check (REQUIRED, both branches):**
+```bash
+test -d "${PROJECT_ROOT}/tests/ui/test-results"           || ARTIFACT_FAIL="results_dir_missing"
+test -f "${PROJECT_ROOT}/tests/ui/playwright-report/index.html" || ARTIFACT_FAIL="html_report_missing"
+```
+If either missing → `warnings: ["${ARTIFACT_FAIL}"]` AND set `artifacts_dir: null` / `html_report: null` (do NOT fabricate paths). Coverage-reporter Phase 2.5 keys off these fields.
 
 ## Python branch (language == python)
 
@@ -207,9 +214,21 @@ Required CLI flags for every UI pytest invocation:
 ```
 If `options.headless: false` → also add `--headed`.
 
-Tests written to `tests/ui/<domain>/test_*.py` using the `page` fixture (pytest-playwright). Do NOT use `@playwright/test` import — that is JS-only. Smoke spec → `tests/ui/test_smoke.py` (root, not domain-scoped). Auth flow → `tests/ui/auth/test_login.py`. Domain sub-dirs derived per Phase 3.5.
+Tests written to `${PROJECT_ROOT}/tests/ui/<domain>/test_*.py` using the `page` fixture (pytest-playwright). Do NOT use `@playwright/test` import — that is JS-only. Smoke spec → `${PROJECT_ROOT}/tests/ui/test_smoke.py` (root, not domain-scoped). Auth flow → `${PROJECT_ROOT}/tests/ui/auth/test_login.py`. Domain sub-dirs derived per Phase 3.5.
+
+**Hard rules — Python branch path enforcement:**
+- Tests live ONLY under `${PROJECT_ROOT}/tests/ui/`. NEVER under sub-packages like `${PROJECT_ROOT}/sample_app/tests/`.
+- NEVER write a single mega `test_ui.py` with all flows. Smoke is the only flat file allowed; everything else is `tests/ui/<domain>/test_<flow>.py`.
+- Path regex: `^tests/ui/(test_smoke\.py|[^/]+/test_.+\.py)$`. Validate before Write.
 
 After test run, the agent records `artifacts_dir: "${PROJECT_ROOT}/tests/ui/test-results"` and `html_report: "${PROJECT_ROOT}/tests/ui/playwright-report/index.html"` in its output JSON so coverage-reporter can link them in the report.
+
+**Post-run artifact existence check (REQUIRED):**
+```bash
+test -d "${PROJECT_ROOT}/tests/ui/test-results"           || ARTIFACT_FAIL="results_dir_missing"
+test -f "${PROJECT_ROOT}/tests/ui/playwright-report/index.html" || ARTIFACT_FAIL="html_report_missing"
+```
+If either missing → `warnings: ["${ARTIFACT_FAIL}"]` AND set `artifacts_dir: null` / `html_report: null` in return JSON (do NOT fabricate paths). Most common cause: forgot to pass one of the required CLI flags. Re-run pytest once with all flags before giving up.
 
 ## Java/C# branch
 

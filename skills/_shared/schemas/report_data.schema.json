@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ReportData",
   "type": "object",
-  "required": ["version", "generated_at", "run_type", "summary", "coverage_by_category", "modules"],
+  "required": ["version", "run_id", "project_root", "language", "locale", "generated_at", "run_type", "quality_score", "summary", "coverage_by_category", "modules", "vulnerabilities_found", "ui_artifacts", "a11y_artifacts"],
   "properties": {
     "version": { "type": "string", "const": "2.0" },
     "run_id": { "type": "string" },

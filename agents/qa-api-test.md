@@ -84,21 +84,55 @@ If down:
 
 # Phase 3 — Output paths (domain sub-dirs)
 
-Sub-dir = first path segment of the route. Within sub-dir, file = resource tag (or controller filename stem).
+Tests live under **`${project_root}/tests/api/`**. **Never under sub-packages** (e.g. `sample_app/tests/`). **Never flat** — domain sub-dir always.
+
+Sub-dir = first path segment of the route (after stripping `/api/` prefix if present). Within sub-dir, file = resource tag (or controller filename stem).
 
 ```
 tests/api/{domain}/{tag}.api.test.{ext}
 
-POST /auth/login              → tests/api/auth/login.api.test.ts
-POST /auth/refresh            → tests/api/auth/refresh.api.test.ts
-GET  /users/:id               → tests/api/users/users.api.test.ts
+POST /auth/login              → tests/api/auth/login.api.test.ts        (Py: tests/api/auth/test_login.py)
+POST /auth/refresh            → tests/api/auth/refresh.api.test.ts      (Py: tests/api/auth/test_refresh.py)
+GET  /users/:id               → tests/api/users/users.api.test.ts       (Py: tests/api/users/test_users.py)
 POST /payments/charge         → tests/api/payments/charge.api.test.ts
 GET  /admin/users             → tests/api/admin/users.api.test.ts
+GET  /api/health              → tests/api/health/test_health.py         (strip "/api/" prefix)
+POST /api/calc/quote          → tests/api/calc/test_quote.py            (strip "/api/" prefix)
+POST /api/register            → tests/api/auth/test_register.py         (group with auth)
+POST /api/login               → tests/api/auth/test_login.py            (group with auth)
+GET  /api/me                  → tests/api/auth/test_me.py               (group with auth)
+GET  /api/users               → tests/api/users/test_users.py
 ```
 
-Multiple routes under same `{domain}/{tag}` → group into one file. `/` (root) routes → `tests/api/root/`.
+Routes sharing same `{domain}/{tag}` → ONE file (e.g. GET + POST + DELETE on `/users` → `users.api.test.*`). Different tags within same domain → SEPARATE files (e.g. `auth/login` vs `auth/refresh` → two files).
+
+`/` (root) routes → `tests/api/root/`.
 
 Python equivalent: `tests/api/{domain}/test_{tag}.py`.
+
+## Hard rule — NEVER mega-file
+
+ONE file per `{domain}/{tag}`. **Never** dump every route into one `tests/test_api.py` or `tests/api/test_all.py`. Minimum file count = number of distinct `{domain}/{tag}` combinations.
+
+Bad (rejected):
+```
+tests/test_api.py                # flat, mega-file
+tests/api/test_all.py            # mega-file under correct root
+sample_app/tests/test_api.py     # wrong root
+```
+
+Good:
+```
+tests/api/auth/test_login.py
+tests/api/auth/test_register.py
+tests/api/users/test_users.py
+tests/api/calc/test_quote.py
+tests/api/health/test_health.py
+```
+
+## Path enforcement (BEFORE writing each file)
+
+Every path MUST regex-match: `^tests/api/[^/]+/.+\.(api\.test|test)\.(ts|js|py)$`. Validate before Write. If `path_contract.required_pattern` provided in input, use that.
 
 # Phase 4 — Generate per endpoint
 

@@ -70,18 +70,42 @@ Generate working unit tests for changed/new modules. Run them. Fix failures up t
 
 # Phase 2 — Output paths (mirror src sub-dirs)
 
-Tests live under `tests/unit/` and **mirror the source sub-dir structure**. Drop common roots (`src/`, `app/`, `lib/`). Never flat.
+Tests live under **`${project_root}/tests/unit/`** and **mirror the source sub-dir structure**. Drop common roots (`src/`, `app/`, `lib/`, `pages/`, `templates/`). **Never flat.** **Never under sub-packages** (e.g. `sample_app/tests/`) — only `${project_root}/tests/unit/`.
 
 ```
 src/auth/login.ts             → tests/unit/auth/login.test.ts
 src/services/users/manager.ts → tests/unit/services/users/manager.test.ts
 src/services/user.py          → tests/unit/services/test_user.py
 src/payments/charge.py        → tests/unit/payments/test_charge.py
+app/auth.py                   → tests/unit/auth/test_auth.py
+app/users.py                  → tests/unit/users/test_users.py
+app/calc.py                   → tests/unit/calc/test_calc.py
+app/routes.py                 → tests/unit/routes/test_routes.py
 src/main/java/UserSvc.java    → src/test/java/UserSvcTest.java
 Services/UserService.cs       → Tests/Unit/Services/UserServiceTests.cs
 ```
 
 If source is at project root (no sub-dir) → `tests/unit/root/<file>.test.<ext>`.
+
+## Path enforcement (BEFORE writing each file)
+
+Every path you emit MUST regex-match: `^tests/unit/[^/]+/.+\.(test|spec)\.(ts|js|py)$` (TS/JS/Py) OR mirror Java/C# conventions above. Validate first, then Write. If your derived path doesn't match:
+
+```python
+# WRONG — flat
+"tests/test_unit_auth.py"            # rejected: no domain dir
+"sample_app/tests/test_unit_auth.py" # rejected: wrong root, no category dir
+"tests/unit/test_auth.py"            # rejected: missing domain sub-dir
+
+# RIGHT
+"tests/unit/auth/test_auth.py"       # correct: category + domain + file
+```
+
+If `path_contract` is provided in input, use `path_contract.required_pattern` for validation. Reject your own output if it would fail. Re-derive once before writing.
+
+## One-file-per-source-module rule
+
+ONE test file per source module. Never consolidate 5 modules into one mega-file. Five Python modules → five test files in their own domain dirs.
 
 # Phase 3 — Generate
 
