@@ -77,14 +77,39 @@ ${project_root}/test-reports/report-{PROJECT_NAME}-{YYYYMMDD-HHMM}.html
 1. **Header bar** — project name, run timestamp, run type, locale toggle (visual only).
 2. **Quality scorecard** — big number `quality_score/100`, color: ≥80 green, 50–79 orange, <50 red.
 3. **Coverage by category** — bar for each: unit, api, ui, security, a11y, contract. Show pct + covered/total.
-4. **Timeline** — phases with duration_ms and status. Skipped phases shown gray.
-5. **Module table** — sortable: path, type, status badge (covered/partial/uncovered/unchanged), tests count.
-6. **Gaps** — high/medium/low severity list, sorted by severity.
-7. **Vulnerabilities found** — populated from security agent's output.
-8. **Flaky tests** — table with path, name, pass_rate, cause_hypothesis, suggested_fix.
-9. **Footer** — generation timestamp, version.
+4. **UI artifacts** (only if `ui_artifacts.playwright_report` non-null):
+   - Button "Open Playwright report ↗" → links to `ui_artifacts.playwright_report` (relative path, opens in new tab).
+   - Screenshot gallery: thumbnail grid of `ui_artifacts.screenshots[]` (first 24). Each is a `<a href="<rel>" target="_blank"><img src="<rel>" loading="lazy" style="max-width:200px;max-height:140px"></a>`. Wrap in collapsible `<details>` if > 8.
+   - Video links: list `ui_artifacts.videos[]` as `<a>` with filename (browser plays inline on click).
+   - Trace links: list `ui_artifacts.traces[]` as `<a>` (downloads .zip; user opens in trace viewer manually).
+   - If list empty (passed clean) → render "No failure artifacts captured ✅".
+5. **A11y artifacts** (only if `a11y_artifacts.axe_report` non-null):
+   - Button "Open axe-core report ↗" → links to `a11y_artifacts.axe_report`.
+6. **Timeline** — phases with duration_ms and status. Skipped phases shown gray.
+7. **Module table** — sortable: path, type, status badge (covered/partial/uncovered/unchanged), tests count.
+8. **Gaps** — high/medium/low severity list, sorted by severity.
+9. **Vulnerabilities found** — populated from security agent's output.
+10. **Flaky tests** — table with path, name, pass_rate, cause_hypothesis, suggested_fix.
+11. **Auto-installed dependencies** (only if `installs_performed[]` non-empty in run_log) — surface what env-validator installed during the run so the user has full audit trail.
+12. **Footer** — generation timestamp, version.
 
-For full HTML/CSS template, Read `~/.claude/qa-skills-reference/html-report-template.md`.
+## Path resolution for artifact links
+
+All artifact paths in `ui_artifacts` / `a11y_artifacts` are absolute or project-relative. The HTML report lives at `${project_root}/test-reports/report-*.html`. Convert each path to a relative `../<path-relative-to-project-root>` so links open correctly when the user double-clicks the HTML file:
+
+```python
+def to_relative(abs_or_rel_path, project_root):
+    p = Path(abs_or_rel_path)
+    if p.is_absolute():
+        try: rel = p.relative_to(project_root)
+        except ValueError: return str(p)  # outside project — leave absolute
+    else:
+        rel = p
+    # report HTML is at ${project_root}/test-reports/, so prepend ../
+    return "../" + str(rel)
+```
+
+For full HTML/CSS template, Read `${CLAUDE_PLUGIN_ROOT}/reference/html-report-template.md`.
 
 # Phase 1 — Read report-data.json
 

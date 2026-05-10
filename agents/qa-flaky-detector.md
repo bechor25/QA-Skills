@@ -33,8 +33,8 @@ After all tests pass, re-run the suite 3 times. Identify tests with inconsistent
   "runs_completed": 3,
   "flaky_tests": [
     {
-      "test_path": "tests/api/users.api.test.ts::POST /users handles concurrent inserts",
-      "path": "tests/api/users.api.test.ts",
+      "test_path": "tests/api/users/users.api.test.ts::POST /users handles concurrent inserts",
+      "path": "tests/api/users/users.api.test.ts",
       "test_name": "POST /users handles concurrent inserts",
       "outcomes": ["passed", "failed", "passed"],
       "flake_count": 1,

@@ -7,7 +7,8 @@ Reference loaded on demand by `qa-ui-test` agent. Contains code templates for ea
 ```typescript
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
-  testDir: './tests/e2e',
+  testDir: './tests/ui/e2e',
+  outputDir: './tests/ui/test-results',
   timeout: 30_000,
   retries: 0,
   use: {
@@ -15,7 +16,9 @@ export default defineConfig({
     headless: true,
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    trace: 'on-first-retry',
   },
+  reporter: [['list'], ['html', { open: 'never', outputFolder: 'tests/ui/playwright-report' }]],
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
 });
 ```

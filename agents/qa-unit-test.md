@@ -20,9 +20,12 @@ Generate working unit tests for changed/new modules. Run them. Fix failures up t
   "language": "typescript|python|java|csharp",
   "modules": [{"path": "...", "hash": "...", "type": "service|util|model|...", "exports": [...]}],
   "locale": "he|en",
-  "budgets": {"max_tokens": 80000, "max_seconds": 600, "max_fix_iterations_per_file": 2}
+  "budgets": {"max_tokens": 80000, "max_seconds": 600, "max_fix_iterations_per_file": 2},
+  "priors": {"unit": [/* prior findings — re-run their test_path before regenerating */]}
 }
 ```
+
+`priors.unit` may be `[]` (first run, all dismissed, or no learnings yet) — handle empty gracefully. For each prior with an existing `test_path`, re-run that test instead of regenerating from scratch. Set `matched_prior_id` on any finding emitted in `vulnerabilities_found`.
 
 # Output
 
@@ -65,14 +68,20 @@ Generate working unit tests for changed/new modules. Run them. Fix failures up t
 | Java     | `pom.xml` has junit-jupiter | JUnit 5 + Mockito |
 | C#       | `*.csproj`                  | NUnit + Moq |
 
-# Phase 2 — Output paths
+# Phase 2 — Output paths (mirror src sub-dirs)
+
+Tests live under `tests/unit/` and **mirror the source sub-dir structure**. Drop common roots (`src/`, `app/`, `lib/`). Never flat.
 
 ```
-src/auth/login.ts        → tests/unit/auth/login.test.ts
-src/services/user.py     → tests/unit/services/test_user.py
-src/main/java/UserSvc.java → src/test/java/UserSvcTest.java
-Services/UserService.cs  → Tests/Unit/UserServiceTests.cs
+src/auth/login.ts             → tests/unit/auth/login.test.ts
+src/services/users/manager.ts → tests/unit/services/users/manager.test.ts
+src/services/user.py          → tests/unit/services/test_user.py
+src/payments/charge.py        → tests/unit/payments/test_charge.py
+src/main/java/UserSvc.java    → src/test/java/UserSvcTest.java
+Services/UserService.cs       → Tests/Unit/Services/UserServiceTests.cs
 ```
+
+If source is at project root (no sub-dir) → `tests/unit/root/<file>.test.<ext>`.
 
 # Phase 3 — Generate
 
@@ -94,7 +103,7 @@ Mandatory inclusions (humans miss these):
 - Time zone handling (3 offsets) for any date/time function.
 - Floating-point precision (`toBeCloseTo`) for any money/percent math.
 
-For full code templates per language, Read `~/.claude/qa-skills-reference/unit-test-patterns.md` — load only the section matching the detected language.
+For full code templates per language, Read `${CLAUDE_PLUGIN_ROOT}/reference/unit-test-patterns.md` (fallback: `reference/unit-test-patterns.md` relative to plugin root) — load only the section matching the detected language.
 
 # Phase 4 — Run
 
@@ -138,4 +147,4 @@ Max 2 iterations per file. Then mark file as `partial`.
 
 # Reference
 
-`~/.claude/qa-skills-reference/unit-test-patterns.md` — full per-language templates.
+`${CLAUDE_PLUGIN_ROOT}/reference/unit-test-patterns.md` — full per-language templates.

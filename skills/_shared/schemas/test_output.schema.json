@@ -1,18 +1,62 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "TestOutput",
-  "type": "array",
-  "items": {
-    "type": "object",
-    "required": ["source_module", "path", "tests_written", "status"],
-    "properties": {
-      "source_module": { "type": "string" },
-      "path": { "type": "string" },
-      "tests_written": { "type": "integer", "minimum": 0 },
-      "status": { "type": "string", "enum": ["created", "updated", "partial", "skipped", "error"] },
-      "execution_result": { "type": "string", "enum": ["passed", "failed", "partial", "not_run", "skipped_no_server"] },
-      "assertions_covered": { "type": "array", "items": { "type": "string" }, "default": [] },
-      "error_message": { "type": ["string", "null"], "default": null }
-    }
+  "description": "Wrapper that each test-generation agent returns to the orchestrator. `outputs[]` holds per-spec records.",
+  "type": "object",
+  "required": ["agent", "status", "outputs"],
+  "properties": {
+    "agent": { "type": "string" },
+    "status": { "type": "string", "enum": ["completed", "partial", "skipped_no_server", "skipped_wrong_server", "skipped_unsupported_language", "error"] },
+    "reason": { "type": ["string", "null"] },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_module", "path", "tests_written"],
+        "properties": {
+          "source_module": { "type": "string" },
+          "path": { "type": "string" },
+          "tests_written": { "type": "integer", "minimum": 0 },
+          "tests_passing": { "type": "integer", "minimum": 0 },
+          "assertions_covered": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "execution_result": { "type": "string", "enum": ["passed", "failed", "partial", "skipped"] },
+          "vulnerabilities_found": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "object",
+              "required": ["category", "rule", "module_path", "module_hash", "line_range", "test_path"],
+              "properties": {
+                "category": { "type": "string" },
+                "rule": { "type": "string" },
+                "module_path": { "type": "string" },
+                "module_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                "line_range": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+                "test_path": { "type": "string" },
+                "description": { "type": "string" },
+                "suggested_fix": { "type": "string" },
+                "matched_prior_id": { "type": ["string", "null"] },
+                "execution_result": { "type": "string" }
+              }
+            }
+          },
+          "violations_summary": {
+            "type": "object",
+            "properties": {
+              "critical": { "type": "integer", "minimum": 0 },
+              "serious":  { "type": "integer", "minimum": 0 },
+              "moderate": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "batches_completed": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "batches_skipped":   { "type": "array", "items": { "type": "string" }, "default": [] },
+    "artifacts_dir":     { "type": ["string", "null"] },
+    "html_report":       { "type": ["string", "null"] },
+    "tokens_used_estimate": { "type": "integer", "minimum": 0 },
+    "elapsed_seconds":      { "type": "number", "minimum": 0 },
+    "warnings": { "type": "array", "items": { "type": "string" }, "default": [] }
   }
 }

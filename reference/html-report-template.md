@@ -60,9 +60,12 @@ Reference loaded on demand by `qa-html-reporter` agent. Self-contained — no CD
       </table>
     </section>
 
+    {UI_ARTIFACTS_SECTION}
+    {A11Y_ARTIFACTS_SECTION}
     {GAPS_SECTION}
     {VULNS_SECTION}
     {FLAKY_SECTION}
+    {INSTALLS_SECTION}
   </main>
 
   <footer><small>QA-Skills · {GENERATED_AT}</small></footer>
@@ -161,6 +164,24 @@ th { font-weight: 600; color: var(--text-secondary); font-size: 0.85rem; }
 footer { text-align: center; padding: 2rem; color: var(--text-secondary); font-size: 0.85rem; }
 [dir="rtl"] .summary-stats { flex-direction: row-reverse; }
 [dir="rtl"] th, [dir="rtl"] td { text-align: right; }
+.artifact-link {
+  display: inline-block; padding: 0.5rem 1rem; margin: 0.25rem 0.5rem 0.25rem 0;
+  background: var(--badge-covered); color: var(--green);
+  border-radius: 4px; text-decoration: none; font-size: 0.9rem; font-weight: 600;
+}
+.artifact-link:hover { opacity: 0.85; }
+.thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; margin-top: 1rem; }
+.thumb-grid a { display: block; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; background: var(--bg); }
+.thumb-grid img { width: 100%; height: 140px; object-fit: cover; display: block; }
+.thumb-caption { padding: 0.4rem; font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.media-list { list-style: none; padding: 0; margin: 0.5rem 0; }
+.media-list li { padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+.media-list a { color: var(--text-primary); text-decoration: none; }
+.media-list a:hover { text-decoration: underline; }
+.installs-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.installs-list li { background: var(--badge-unchanged); padding: 0.3rem 0.6rem; border-radius: 4px; list-style: none; font-size: 0.85rem; }
+details { margin-top: 1rem; }
+details summary { cursor: pointer; color: var(--text-secondary); font-size: 0.9rem; }
 ```
 
 ## Locale strings
@@ -186,7 +207,16 @@ footer { text-align: center; padding: 2rem; color: var(--text-secondary); font-s
     "T_TESTS": "Tests",
     "T_GAPS": "Gaps",
     "T_VULNS": "Vulnerabilities",
-    "T_FLAKY_TESTS": "Flaky tests"
+    "T_FLAKY_TESTS": "Flaky tests",
+    "T_UI_ARTIFACTS": "UI test artifacts",
+    "T_OPEN_PLAYWRIGHT": "Open Playwright report ↗",
+    "T_SCREENSHOTS": "Failure screenshots",
+    "T_VIDEOS": "Videos",
+    "T_TRACES": "Traces (open in trace viewer)",
+    "T_NO_FAILURES": "No failure artifacts captured ✅",
+    "T_A11Y_ARTIFACTS": "Accessibility report",
+    "T_OPEN_AXE": "Open axe-core report ↗",
+    "T_INSTALLS": "Auto-installed dependencies"
   },
   "he": {
     "T_PROJECT": "פרויקט",
@@ -207,7 +237,16 @@ footer { text-align: center; padding: 2rem; color: var(--text-secondary); font-s
     "T_TESTS": "בדיקות",
     "T_GAPS": "פערים",
     "T_VULNS": "פגיעויות",
-    "T_FLAKY_TESTS": "בדיקות לא יציבות"
+    "T_FLAKY_TESTS": "בדיקות לא יציבות",
+    "T_UI_ARTIFACTS": "ארטיפקטים מבדיקות UI",
+    "T_OPEN_PLAYWRIGHT": "פתח דוח Playwright ↗",
+    "T_SCREENSHOTS": "צילומי מסך מכשלים",
+    "T_VIDEOS": "וידאו",
+    "T_TRACES": "Traces (לפתיחה ב-trace viewer)",
+    "T_NO_FAILURES": "לא נלכדו ארטיפקטים מכשלים ✅",
+    "T_A11Y_ARTIFACTS": "דוח נגישות",
+    "T_OPEN_AXE": "פתח דוח axe-core ↗",
+    "T_INSTALLS": "תלויות שהותקנו אוטומטית"
   }
 }
 ```
@@ -219,4 +258,83 @@ def score_class(score: int) -> str:
     if score >= 80: return ""        # green (default)
     if score >= 50: return "medium"  # orange
     return "low"                     # red
+```
+
+## UI artifacts section template
+
+Render only when `report_data.ui_artifacts.playwright_report` is non-null. All paths are converted to relative form via `to_relative()` (see qa-html-reporter.md "Path resolution for artifact links").
+
+```python
+def render_ui_artifacts(ua, t, project_root):
+    if not ua or not ua.get("playwright_report"):
+        return ""
+    pr = to_relative(ua["playwright_report"], project_root)
+    shots = ua.get("screenshots", [])
+    vids  = ua.get("videos", [])
+    trcs  = ua.get("traces", [])
+
+    parts = [f'<section class="card"><h2>{t["T_UI_ARTIFACTS"]}</h2>']
+    parts.append(f'<a class="artifact-link" href="{pr}" target="_blank" rel="noopener">{t["T_OPEN_PLAYWRIGHT"]}</a>')
+
+    if shots:
+        head = shots[:8]; rest = shots[8:24]
+        parts.append(f'<h3 style="margin-top:1.25rem;font-size:1rem;">{t["T_SCREENSHOTS"]} ({len(shots)})</h3>')
+        parts.append('<div class="thumb-grid">')
+        for s in head:
+            rel = to_relative(s, project_root)
+            name = s.split("/")[-1]
+            parts.append(f'<a href="{rel}" target="_blank" rel="noopener"><img src="{rel}" loading="lazy" alt="{name}"><div class="thumb-caption">{name}</div></a>')
+        parts.append('</div>')
+        if rest:
+            parts.append(f'<details><summary>+{len(rest)} more</summary><div class="thumb-grid">')
+            for s in rest:
+                rel = to_relative(s, project_root)
+                name = s.split("/")[-1]
+                parts.append(f'<a href="{rel}" target="_blank" rel="noopener"><img src="{rel}" loading="lazy" alt="{name}"><div class="thumb-caption">{name}</div></a>')
+            parts.append('</div></details>')
+    elif not vids and not trcs:
+        parts.append(f'<p style="margin-top:1rem;color:var(--text-secondary);">{t["T_NO_FAILURES"]}</p>')
+
+    if vids:
+        parts.append(f'<h3 style="margin-top:1.25rem;font-size:1rem;">{t["T_VIDEOS"]} ({len(vids)})</h3><ul class="media-list">')
+        for v in vids[:20]:
+            rel = to_relative(v, project_root); name = v.split("/")[-1]
+            parts.append(f'<li><a href="{rel}" target="_blank" rel="noopener">🎬 {name}</a></li>')
+        parts.append('</ul>')
+    if trcs:
+        parts.append(f'<h3 style="margin-top:1.25rem;font-size:1rem;">{t["T_TRACES"]} ({len(trcs)})</h3><ul class="media-list">')
+        for tr in trcs[:20]:
+            rel = to_relative(tr, project_root); name = tr.split("/")[-1]
+            parts.append(f'<li><a href="{rel}" download>📦 {name}</a></li>')
+        parts.append('</ul>')
+    parts.append('</section>')
+    return "".join(parts)
+```
+
+## A11y artifacts section template
+
+```python
+def render_a11y_artifacts(aa, t, project_root):
+    if not aa or not aa.get("axe_report"):
+        return ""
+    rel = to_relative(aa["axe_report"], project_root)
+    return (
+        f'<section class="card"><h2>{t["T_A11Y_ARTIFACTS"]}</h2>'
+        f'<a class="artifact-link" href="{rel}" target="_blank" rel="noopener">{t["T_OPEN_AXE"]}</a>'
+        f'</section>'
+    )
+```
+
+## Auto-installed dependencies section template
+
+```python
+def render_installs(installs, t):
+    if not installs:
+        return ""
+    items = "".join(f'<li>📦 {i["name"]}{" (failed)" if i.get("exit", 0) != 0 else ""}</li>' for i in installs)
+    return (
+        f'<section class="card"><h2>{t["T_INSTALLS"]}</h2>'
+        f'<ul class="installs-list">{items}</ul>'
+        f'</section>'
+    )
 ```

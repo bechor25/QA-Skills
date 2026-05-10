@@ -41,7 +41,7 @@ Generate working security tests targeted at vulnerabilities indicated by code-an
   "outputs": [
     {
       "source_module": "src/auth/login.ts",
-      "path": "tests/security/auth.security.test.py",
+      "path": "tests/security/auth/injection.security.test.py",
       "tests_written": 11,
       "tests_passing": 9,
       "assertions_covered": ["jwt:alg_none_rejected", "sql_injection:login_email", "idor:update_other_user"],
@@ -111,7 +111,7 @@ Behavior on priors:
 1. **Pre-flight required.** No server → `skipped_no_server`.
 2. **Never weaken assertions to make tests pass.** A failing security test = real vuln. Document in `vulnerabilities_found`.
 3. Only generate tests for categories where signals exist (no generic test spam).
-4. Group by category: `injection.security.test.*`, `auth.security.test.*`, `exposure.security.test.*`.
+4. Group by domain sub-dir + category: `tests/security/{domain}/{category}.security.test.*`. Domain = first path segment of the route the test exercises (or `src/` sub-dir of the module). Examples: `tests/security/auth/injection.security.test.py`, `tests/security/payments/idor.security.test.ts`, `tests/security/admin/auth.security.test.py`. Group files by domain so testers can scan one folder per feature.
 5. Max 2 fix iterations.
 
 # Phase 1 — Pre-flight
@@ -167,7 +167,7 @@ Generate parameterized tests using payload arrays. Categories:
 
 **CSRF:** state-change from `Origin: https://evil.com` → 401/403.
 
-For full payload arrays and per-language code, Read `~/.claude/qa-skills-reference/security-test-patterns.md` — load section by category.
+For full payload arrays and per-language code, Read `${CLAUDE_PLUGIN_ROOT}/reference/security-test-patterns.md` — load section by category.
 
 # Phase 4 — Run
 
@@ -200,4 +200,4 @@ Max 2 fix iterations.
 
 # Reference
 
-`~/.claude/qa-skills-reference/security-test-patterns.md`
+`${CLAUDE_PLUGIN_ROOT}/reference/security-test-patterns.md`

@@ -1,6 +1,6 @@
 # QA Skills — Usage Guide
 
-> **v2 — Skills + Agents architecture.** Heavy QA work now runs in isolated subagent contexts (one per category). The main conversation stays small, even on large projects. UI tests with no dev server skip in seconds instead of looping for an hour. See [REFACTOR_PLAN.md](REFACTOR_PLAN.md) for design details. User-facing triggers and output are unchanged from v1.
+> **v2 — Skills + Agents architecture.** Heavy QA work now runs in isolated subagent contexts (one per category). The main conversation stays small, even on large projects. UI tests with no dev server skip in seconds instead of looping for an hour. See [AGENT.md](AGENT.md) for design details. User-facing triggers and output are unchanged from v1.
 
 ---
 

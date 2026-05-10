@@ -21,9 +21,10 @@ Thin trigger skill. Delegates to `qa-skills:qa-api-test` agent.
 
 1. Detect locale.
 2. Resolve `project_root`.
-3. Invoke `qa-skills:qa-code-analyzer` to get routes.
-4. Detect API server URL from project config (uvicorn port, spring boot port, package.json scripts). Default `http://localhost:8000`.
-5. Invoke `qa-skills:qa-api-test` agent with:
+3. **Pre-step — env-validator:** invoke `qa-skills:qa-env-validator` with `{categories_enabled: ["api"], auto_install: true}`. Installs supertest/httpx + test framework if missing. Abort if `api` removed.
+4. Invoke `qa-skills:qa-code-analyzer` to get routes.
+5. Detect API server URL from project config (uvicorn port, spring boot port, package.json scripts). Default `http://localhost:8000`.
+6. Invoke `qa-skills:qa-api-test` agent with:
    ```json
    {
      "project_root": "...",
@@ -38,6 +39,6 @@ Thin trigger skill. Delegates to `qa-skills:qa-api-test` agent.
      "budgets": {"max_tokens": 80000, "max_seconds": 600}
    }
    ```
-6. Display agent summary.
+7. Display agent summary. Surface `installs_performed[]` if non-empty (📦 prefix).
 
 The agent owns pre-flight, generation, execution, fix loop.

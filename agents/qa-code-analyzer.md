@@ -138,12 +138,13 @@ input_fields: /\[FromBody\]|\[FromQuery\]|IFormFile/
 
 # Phase 4 — Warnings (humans miss these)
 
-Flag at top level:
-- **Unauthenticated routes** that access DB.
-- **Mass assignment risk:** `new Entity(req.body)` patterns.
-- **Logging sensitive fields:** `console.log(password)`, `logger.info(token)`.
-- **Missing error boundaries:** async functions without try/catch.
-- **Hardcoded secrets:** `api.key = "..."` patterns.
+Flag at top level (`warnings[]` array of short string codes):
+- `unauthenticated_db_route` — Unauthenticated routes that access DB.
+- `mass_assignment_risk` — `new Entity(req.body)` patterns.
+- `logging_sensitive_fields` — `console.log(password)`, `logger.info(token)`.
+- `missing_async_error_boundary` — async functions without try/catch.
+- `hardcoded_secret` — `api.key = "..."` patterns.
+- `async_handler_detected` — (Python only) any route handler defined with `async def`. Triggers `pytest-asyncio` install in env-validator.
 
 # Phase 5 — Output
 

@@ -137,7 +137,7 @@ Heuristic-only findings (`source_weight ≤ 0.4`) cannot reach `confirmed` even 
 Every state transition appends a single JSONL line to `learnings.log`. The log is append-only — never rewritten in place.
 
 ```jsonl
-{"ts":"...","action":"add","tier":"candidate","id":"...","reason":"qa-security-test:run_1","evidence":"tests/test_security.py::test_x"}
+{"ts":"...","action":"add","tier":"candidate","id":"...","reason":"qa-security-test:run_1","evidence":"tests/security/auth/auth.security.test.py::test_x"}
 {"ts":"...","action":"increment","id":"...","occurrences":2,"run":"run_2"}
 {"ts":"...","action":"promote","id":"...","from":"candidate","to":"confirmed","trigger":"3_occurrences"}
 {"ts":"...","action":"demote","id":"...","from":"confirmed","to":"candidate","trigger":"module_hash_changed"}

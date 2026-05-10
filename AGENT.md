@@ -153,7 +153,7 @@ qa-skills/
 │   ├── qa-flaky-detector.md
 │   ├── qa-coverage-reporter.md
 │   └── qa-html-reporter.md
-├── reference/                       ← code patterns loaded on demand
+├── reference/                       ← code patterns loaded on demand (relative to plugin root)
 │   ├── ui-test-patterns.md
 │   ├── unit-test-patterns.md
 │   ├── api-test-patterns.md
@@ -161,16 +161,38 @@ qa-skills/
 │   ├── a11y-test-patterns.md
 │   ├── contract-test-patterns.md
 │   ├── html-report-template.md
+│   ├── learnings-schema.md
+│   ├── learnings-promotion.md
 │   └── messages.md
-├── test/
 ├── AGENT.md
 ├── README.md
-├── REFACTOR_PLAN.md
-├── USAGE.md
-└── install.sh
+└── USAGE.md
 ```
 
-When installed:
-- Skills → `~/.claude/skills/<name>/`
-- Agents → `~/.claude/agents/<name>.md`
-- Reference → `~/.claude/qa-skills-reference/`
+Installed via Claude Code plugin marketplace (`claude plugin install qa-skills`). All file paths inside agents resolve via `${CLAUDE_PLUGIN_ROOT}/...` so reference templates load from the plugin install dir — no manual install script needed.
+
+## Test output layout (what testers see in their project)
+
+```
+${project_root}/
+├── tests/
+│   ├── unit/<domain mirroring src/>/        ← e.g. tests/unit/services/users/manager.test.ts
+│   ├── api/<route-domain>/<tag>.api.test.*  ← e.g. tests/api/auth/login.api.test.ts
+│   ├── security/<route-domain>/<category>.security.test.*
+│   ├── contract/<route-domain>/<tag>.contract.test.*
+│   ├── ui/                                   ← single root for all UI artifacts
+│   │   ├── e2e/<domain>/*.spec.ts            (TS) — specs
+│   │   ├── <domain>/test_*.py                (Python) — specs
+│   │   ├── conftest.py                        (Python only)
+│   │   ├── playwright-report/index.html      ← Playwright HTML report
+│   │   └── test-results/                     ← screenshots, videos, traces (only on failure)
+│   └── a11y/<route-domain>/*.a11y.spec.*     + axe-report/index.html + test-results/
+├── test-reports/
+│   ├── report-data.json                      ← machine-readable aggregate
+│   └── report-<project>-<timestamp>.html     ← main HTML (links to UI/a11y artifacts above)
+└── .qa-skills/
+    ├── checkpoints/run.json                  ← resume support
+    ├── logs/<run_id>/{analysis.json,strategy.json,...}
+    ├── learnings.json                        ← per-project memory of confirmed/candidate findings
+    └── learnings.log                         ← append-only audit trail
+```

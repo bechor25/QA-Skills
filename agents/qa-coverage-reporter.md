@@ -41,8 +41,11 @@ Aggregate all test outputs, state, flaky info, and quality score into `report-da
   "coverage_by_category": {
     "unit": {"pct": 78, "covered": 12, "total": 15},
     "api": {"pct": 100, "covered": 4, "total": 4},
-    "ui": {"pct": 0, "covered": 0, "total": 6, "reason": "skipped_no_server"},
-    "security": {"pct": 60, "covered": 3, "total": 5}
+    "ui": {"pct": 0, "covered": 0, "total": 6, "reason": "skipped_no_server",
+            "artifacts": {"playwright_report": null, "test_results_dir": null, "screenshots": [], "videos": [], "traces": []}},
+    "security": {"pct": 60, "covered": 3, "total": 5},
+    "a11y": {"pct": 80, "covered": 4, "total": 5,
+             "artifacts": {"axe_report": "${PROJECT_ROOT}/tests/a11y/axe-report/index.html", "test_results_dir": "${PROJECT_ROOT}/tests/a11y/test-results"}}
   },
   "gaps": [
     {"path": "src/payments/charge.ts", "severity": "high", "reason": "no tests; touches money"}
@@ -102,6 +105,40 @@ coverage[cat] = {"pct": int(covered/total*100) if total else 0, "covered": cover
 
 **Hard rule:** `coverage[cat].files` MUST be a subset of `agent_output.outputs[].path`. Never list a test file in `ui` that was not produced by `qa-ui-test`. Same for every other category. Existing TestClient/HTTP-level files do NOT count toward `ui`.
 
+# Phase 2.5 — Collect UI/a11y artifacts
+
+For `ui` and `a11y` categories, also collect artifact paths from the source agent's return JSON:
+
+```python
+def collect_artifacts(agent_output, category, project_root):
+    if not agent_output or category not in {"ui", "a11y"}:
+        return None
+    art = {
+        "playwright_report" if category == "ui" else "axe_report":
+            agent_output.get("html_report"),
+        "test_results_dir": agent_output.get("artifacts_dir"),
+        "screenshots": [],
+        "videos": [],
+        "traces": [],
+    }
+    # Walk artifacts_dir for failure media (screenshots/videos/traces are written by Playwright on failure).
+    results_dir = agent_output.get("artifacts_dir")
+    if results_dir and Path(results_dir).is_dir():
+        for p in Path(results_dir).rglob("*"):
+            if not p.is_file(): continue
+            rel = str(p.relative_to(project_root))
+            name = p.name.lower()
+            if name.endswith((".png", ".jpg", ".jpeg")): art["screenshots"].append(rel)
+            elif name.endswith((".webm", ".mp4")):      art["videos"].append(rel)
+            elif name.endswith(".zip") and "trace" in name: art["traces"].append(rel)
+        # Cap to first 50 each to avoid bloat.
+        for k in ("screenshots", "videos", "traces"):
+            art[k] = sorted(art[k])[:50]
+    coverage[category]["artifacts"] = art
+```
+
+Run this immediately after building each category's coverage entry. For non-ui/non-a11y categories, omit `artifacts` entirely.
+
 # Phase 3 — Gap identification
 
 Mark gaps `severity: high` when:
@@ -139,6 +176,17 @@ Pass through the timeline from caller. Sort by start time. Compute total elapsed
     "flaky_count": 0
   },
   "coverage_by_category": {...},
+  "ui_artifacts": {
+    "playwright_report": "${PROJECT_ROOT}/tests/ui/playwright-report/index.html",
+    "test_results_dir":  "${PROJECT_ROOT}/tests/ui/test-results",
+    "screenshots":       ["tests/ui/test-results/.../failure.png", "..."],
+    "videos":            ["tests/ui/test-results/.../video.webm"],
+    "traces":            ["tests/ui/test-results/.../trace.zip"]
+  },
+  "a11y_artifacts": {
+    "axe_report":       "${PROJECT_ROOT}/tests/a11y/axe-report/index.html",
+    "test_results_dir": "${PROJECT_ROOT}/tests/a11y/test-results"
+  },
   "modules": [{"path": "...", "status": "covered|partial|uncovered|unchanged", "tests": [...]}],
   "gaps": [...],
   "flaky_tests": [...],
@@ -147,6 +195,8 @@ Pass through the timeline from caller. Sort by start time. Compute total elapsed
   "vulnerabilities_found": [...]
 }
 ```
+
+Promote `coverage[ui].artifacts` and `coverage[a11y].artifacts` (set in Phase 2.5) to top-level `ui_artifacts` / `a11y_artifacts` for the html-reporter to consume directly. Keep them under `coverage_by_category` too — duplicate intentionally so per-category renderer also has them.
 
 Write to `${project_root}/test-reports/report-data.json`.
 

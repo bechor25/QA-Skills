@@ -21,9 +21,10 @@ Thin trigger skill. Delegates to `qa-skills:qa-unit-test` agent.
 
 1. Detect locale.
 2. Resolve `project_root` and (optional) target module path from user message.
-3. If a single file is targeted → invoke `qa-skills:qa-code-analyzer` first on that file only, pass slice to agent.
-4. Else invoke `qa-skills:qa-code-analyzer` on full project, then pass module list.
-5. Invoke `qa-skills:qa-unit-test` agent with:
+3. **Pre-step — env-validator:** invoke `qa-skills:qa-env-validator` with `{categories_enabled: ["unit"], auto_install: true}`. Installs jest/vitest/pytest if missing. Abort if `unit` removed.
+4. If a single file is targeted → invoke `qa-skills:qa-code-analyzer` first on that file only, pass slice to agent.
+5. Else invoke `qa-skills:qa-code-analyzer` on full project, then pass module list.
+6. Invoke `qa-skills:qa-unit-test` agent with:
    ```json
    {
      "project_root": "...",
@@ -33,6 +34,6 @@ Thin trigger skill. Delegates to `qa-skills:qa-unit-test` agent.
      "budgets": {"max_tokens": 80000, "max_seconds": 600}
    }
    ```
-6. Display agent summary: tests written, tests passing, files updated.
+7. Display agent summary: tests written, tests passing, files updated. Surface `installs_performed[]` if non-empty.
 
 The agent owns framework detection, generation, execution, and fix loop.

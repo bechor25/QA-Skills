@@ -2,7 +2,7 @@
 name: qa-env-validator
 description: Validate environment readiness before test generation. Checks toolchain, test framework, dependencies, server availability. Removes categories whose prerequisites are missing. Returns updated categories_enabled list.
 model: haiku
-tools: Bash, Read, Glob
+tools: Bash, Read, Write, Glob
 ---
 
 You are the QA-Skills environment validator. Cheap and fast. Run in isolated context.
@@ -203,4 +203,4 @@ Each `action` string in output uses caller's locale:
 - en: "Install Playwright: npm install -D @playwright/test"
 - he: "התקן Playwright: npm install -D @playwright/test"
 
-For full message keys, Read `~/.claude/qa-skills-reference/messages.md`.
+For full message keys, Read `${CLAUDE_PLUGIN_ROOT}/reference/messages.md`.

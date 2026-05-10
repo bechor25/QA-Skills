@@ -8,6 +8,9 @@
     "additional_languages": { "type": "array", "items": { "type": "string" }, "default": [] },
     "scanned_at": { "type": "string", "format": "date-time" },
     "project_root": { "type": "string" },
+    "frontend_dev_server": { "type": ["string", "null"], "default": null },
+    "backend_dev_server":  { "type": ["string", "null"], "default": null },
+    "frontend_kind": { "type": "string", "enum": ["spa", "ssr", "mixed", "none"], "default": "none" },
     "modules": {
       "type": "array",
       "items": {
@@ -41,7 +44,19 @@
         }
       }
     },
-    "frontend_files": { "type": "array", "default": [] },
+    "frontend_files": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "hash": { "type": "string" },
+          "kind": { "type": "string", "enum": ["spa_component", "ssr_template", "static_html"] },
+          "has_forms": { "type": "boolean", "default": false }
+        }
+      }
+    },
     "stats": {
       "type": "object",
       "properties": {
@@ -50,7 +65,8 @@
         "has_auth": { "type": "boolean" },
         "has_db": { "type": "boolean" },
         "has_api": { "type": "boolean" },
-        "has_frontend": { "type": "boolean" }
+        "has_frontend": { "type": "boolean" },
+        "frontend_kind": { "type": "string", "enum": ["spa", "ssr", "mixed", "none"] }
       }
     },
     "warnings": { "type": "array", "default": [] },

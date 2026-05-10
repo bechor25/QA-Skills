@@ -21,9 +21,12 @@ Generate contract tests verifying API response shape matches declared OpenAPI sp
   "routes": [...],
   "locale": "he|en",
   "preflight": {"server_check_url": "http://localhost:8000", "abort_if_no_server": true},
-  "budgets": {"max_tokens": 60000, "max_seconds": 480, "max_fix_iterations_per_file": 2}
+  "budgets": {"max_tokens": 60000, "max_seconds": 480, "max_fix_iterations_per_file": 2},
+  "priors": {"contract": [/* prior findings */]}
 }
 ```
+
+`priors.contract` may be `[]`. Re-run prior `test_path` for known schema drifts; set `matched_prior_id` on emitted findings.
 
 # Output
 
@@ -35,7 +38,7 @@ Generate contract tests verifying API response shape matches declared OpenAPI sp
   "outputs": [
     {
       "source_module": "src/routes/users.ts",
-      "path": "tests/contract/users.contract.test.ts",
+      "path": "tests/contract/users/users.contract.test.ts",
       "tests_written": 6,
       "tests_passing": 6,
       "assertions_covered": ["GET /users:schema_match", "POST /users:schema_match"],
@@ -69,6 +72,17 @@ If found → mode `openapi`.
 Else if `contracts/*.json` exist → mode `golden_update`.
 Else → mode `golden_capture` (first run, capture and save).
 
+# Phase 2.5 — Output paths (domain sub-dirs)
+
+```
+tests/contract/{domain}/{tag}.contract.test.{ext}
+
+GET  /users/:id          → tests/contract/users/users.contract.test.ts
+POST /payments/charge    → tests/contract/payments/charge.contract.test.ts
+```
+
+Group routes sharing `{domain}/{tag}` into one file. Python: `tests/contract/{domain}/test_{tag}.py`.
+
 # Phase 3 — Generate
 
 **Mode openapi:** for each route, generate test that:
@@ -82,7 +96,7 @@ Use `ajv` (TS) / `jsonschema` (Python) for schema validation.
 
 **Mode golden_update:** read existing `contracts/{tag}.json`, generate test asserting response shape matches.
 
-For full templates, Read `~/.claude/qa-skills-reference/contract-test-patterns.md`.
+For full templates, Read `${CLAUDE_PLUGIN_ROOT}/reference/contract-test-patterns.md`.
 
 # Phase 4 — Run
 
@@ -103,4 +117,4 @@ Max 2 iterations.
 
 # Reference
 
-`~/.claude/qa-skills-reference/contract-test-patterns.md`
+`${CLAUDE_PLUGIN_ROOT}/reference/contract-test-patterns.md`

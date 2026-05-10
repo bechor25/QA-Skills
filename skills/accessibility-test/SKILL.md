@@ -19,9 +19,10 @@ Thin trigger skill. Delegates to `qa-skills:qa-a11y-test` agent.
 
 1. Detect locale.
 2. Resolve `project_root`.
-3. Invoke `qa-skills:qa-code-analyzer` to get frontend_files + routes.
-4. Detect frontend dev server URL.
-5. Invoke `qa-skills:qa-a11y-test` agent with:
+3. **Pre-step — env-validator:** invoke `qa-skills:qa-env-validator` with `{categories_enabled: ["a11y"], auto_install: true}`. Installs Playwright + axe-core/playwright if missing. Abort if `a11y` removed.
+4. Invoke `qa-skills:qa-code-analyzer` to get frontend_files + routes.
+5. Detect frontend dev server URL.
+6. Invoke `qa-skills:qa-a11y-test` agent with:
    ```json
    {
      "project_root": "...",
@@ -32,6 +33,6 @@ Thin trigger skill. Delegates to `qa-skills:qa-a11y-test` agent.
      "budgets": {"max_tokens": 60000, "max_seconds": 480}
    }
    ```
-6. Display agent summary including violations counts.
+7. Display agent summary including violations counts. Surface `installs_performed[]` if non-empty.
 
 The agent owns axe-core integration and WCAG check generation.

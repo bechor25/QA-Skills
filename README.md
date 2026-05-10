@@ -50,7 +50,7 @@ This isolation:
 - Cost-optimizes — each agent runs on the right model (Haiku for parsing, Sonnet for generation, Opus for UI/security).
 - Stops runaway loops — every agent has a token budget cap and pre-flight server checks.
 
-See [REFACTOR_PLAN.md](REFACTOR_PLAN.md) for full design and rationale.
+See [AGENT.md](AGENT.md) for full design and rationale.
 
 ## Supported languages
 
@@ -106,10 +106,9 @@ Environment variables read by the orchestrator:
 
 ## Local development
 
-Run `./install.sh` once. It symlinks skills, agents, and reference patterns to `~/.claude/`. Edits in this repo go live immediately — no reinstall.
+Plugin loads from this repo via `claude plugin install qa-skills` (marketplace). All file paths inside agents resolve via `${CLAUDE_PLUGIN_ROOT}/...` — reference templates load from the plugin install dir. To iterate locally, edit files here and run `claude plugin update qa-skills`.
 
 ## Documentation
 
 - [USAGE.md](USAGE.md) — full usage guide (English + Hebrew)
 - [AGENT.md](AGENT.md) — all trigger phrases
-- [REFACTOR_PLAN.md](REFACTOR_PLAN.md) — design rationale

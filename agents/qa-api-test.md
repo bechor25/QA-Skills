@@ -27,9 +27,12 @@ Generate working HTTP-level tests for routes detected by code-analyzer. Pre-flig
     "abort_if_no_server": true,
     "start_server_command": null
   },
-  "budgets": {"max_tokens": 80000, "max_seconds": 600, "max_fix_iterations_per_file": 2}
+  "budgets": {"max_tokens": 80000, "max_seconds": 600, "max_fix_iterations_per_file": 2},
+  "priors": {"api": [/* prior findings */]}
 }
 ```
+
+`priors.api` may be `[]`. Re-run any prior `test_path` before regenerating; set `matched_prior_id` on emitted findings.
 
 # Output
 
@@ -40,7 +43,7 @@ Generate working HTTP-level tests for routes detected by code-analyzer. Pre-flig
   "outputs": [
     {
       "source_module": "src/routes/auth.ts",
-      "path": "tests/api/auth.api.test.ts",
+      "path": "tests/api/auth/login.api.test.ts",
       "tests_written": 14,
       "tests_passing": 14,
       "assertions_covered": ["POST /auth/login:happy_path", "POST /auth/login:missing_password"],
@@ -79,14 +82,23 @@ If down:
 | Java     | RestAssured + JUnit 5 |
 | C#       | HttpClient + NUnit (with WebApplicationFactory) |
 
-# Phase 3 — Output paths
+# Phase 3 — Output paths (domain sub-dirs)
+
+Sub-dir = first path segment of the route. Within sub-dir, file = resource tag (or controller filename stem).
 
 ```
-tests/api/{tag}.api.test.{ext}
+tests/api/{domain}/{tag}.api.test.{ext}
 
-POST /auth/login → tests/api/auth.api.test.ts
-GET  /users/*    → tests/api/users.api.test.ts
+POST /auth/login              → tests/api/auth/login.api.test.ts
+POST /auth/refresh            → tests/api/auth/refresh.api.test.ts
+GET  /users/:id               → tests/api/users/users.api.test.ts
+POST /payments/charge         → tests/api/payments/charge.api.test.ts
+GET  /admin/users             → tests/api/admin/users.api.test.ts
 ```
+
+Multiple routes under same `{domain}/{tag}` → group into one file. `/` (root) routes → `tests/api/root/`.
+
+Python equivalent: `tests/api/{domain}/test_{tag}.py`.
 
 # Phase 4 — Generate per endpoint
 
@@ -126,7 +138,7 @@ Mandatory inclusions humans miss:
 - 403 vs 404 distinction (auth'd user accessing other user's data → 403, not 404).
 - Numeric ID type handling (`/users/abc` → 400/404, not 500).
 
-For full templates per framework, Read `~/.claude/qa-skills-reference/api-test-patterns.md` — load only the section for the detected framework.
+For full templates per framework, Read `${CLAUDE_PLUGIN_ROOT}/reference/api-test-patterns.md` — load only the section for the detected framework.
 
 # Phase 5 — Run
 
@@ -175,4 +187,4 @@ Do NOT fix issues that indicate real bugs:
 
 # Reference
 
-`~/.claude/qa-skills-reference/api-test-patterns.md`
+`${CLAUDE_PLUGIN_ROOT}/reference/api-test-patterns.md`

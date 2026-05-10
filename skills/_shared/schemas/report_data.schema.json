@@ -2,22 +2,28 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ReportData",
   "type": "object",
-  "required": ["project_name", "generated_at", "run_type", "summary", "coverage_by_category", "modules"],
+  "required": ["version", "generated_at", "run_type", "summary", "coverage_by_category", "modules"],
   "properties": {
+    "version": { "type": "string", "const": "2.0" },
+    "run_id": { "type": "string" },
     "project_name": { "type": "string" },
+    "project_root": { "type": "string" },
+    "language": { "type": "string" },
+    "locale": { "type": "string", "enum": ["he", "en"] },
     "generated_at": { "type": "string" },
     "run_type": { "type": "string", "enum": ["full", "incremental"] },
     "quality_score": { "type": "integer", "minimum": 0, "maximum": 100 },
     "summary": {
       "type": "object",
       "properties": {
-        "files_scanned": { "type": "integer" },
-        "files_with_tests": { "type": "integer" },
-        "new_tests_generated": { "type": "integer" },
-        "tests_updated": { "type": "integer" },
-        "tests_unchanged": { "type": "integer" }
+        "modules_total": { "type": "integer" },
+        "tests_new":       { "type": "integer" },
+        "tests_updated":   { "type": "integer" },
+        "tests_unchanged": { "type": "integer" },
+        "flaky_count":     { "type": "integer" }
       }
     },
+    "vulnerabilities_found": { "type": "array", "default": [] },
     "coverage_by_category": { "type": "object" },
     "modules": { "type": "array" },
     "gaps": { "type": "array", "default": [] },
@@ -26,6 +32,25 @@
     "flaky_tests": { "type": "array", "default": [] },
     "timeline": { "type": "array", "default": [] },
     "warnings": { "type": "array", "default": [] },
-    "run_log": { "type": "array", "default": [] }
+    "run_log": { "type": "array", "default": [] },
+    "ui_artifacts": {
+      "type": ["object", "null"],
+      "default": null,
+      "properties": {
+        "playwright_report": { "type": ["string", "null"] },
+        "test_results_dir":  { "type": ["string", "null"] },
+        "screenshots":       { "type": "array", "items": { "type": "string" }, "default": [] },
+        "videos":            { "type": "array", "items": { "type": "string" }, "default": [] },
+        "traces":            { "type": "array", "items": { "type": "string" }, "default": [] }
+      }
+    },
+    "a11y_artifacts": {
+      "type": ["object", "null"],
+      "default": null,
+      "properties": {
+        "axe_report":       { "type": ["string", "null"] },
+        "test_results_dir": { "type": ["string", "null"] }
+      }
+    }
   }
 }

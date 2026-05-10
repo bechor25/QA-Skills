@@ -22,9 +22,12 @@ Generate working WCAG 2.1 AA accessibility tests for frontend pages. Pre-flight 
   "routes": [/* page-serving routes */],
   "locale": "he|en",
   "preflight": {"server_check_url": "http://localhost:3000", "abort_if_no_server": true},
-  "budgets": {"max_tokens": 60000, "max_seconds": 480, "max_fix_iterations_per_file": 2}
+  "budgets": {"max_tokens": 60000, "max_seconds": 480, "max_fix_iterations_per_file": 2},
+  "priors": {"a11y": [/* prior findings */]}
 }
 ```
+
+`priors.a11y` may be `[]`. Re-run prior `test_path` for known violations; set `matched_prior_id` on emitted findings.
 
 # Output
 
@@ -35,7 +38,7 @@ Generate working WCAG 2.1 AA accessibility tests for frontend pages. Pre-flight 
   "outputs": [
     {
       "source_module": "src/pages/Home.tsx",
-      "path": "tests/a11y/home.a11y.spec.ts",
+      "path": "tests/a11y/root/home.a11y.spec.ts",
       "tests_written": 5,
       "tests_passing": 5,
       "assertions_covered": ["a11y:no_critical_violations", "a11y:focus_order"],
@@ -72,7 +75,7 @@ Branch by `language`.
 test -d "${PROJECT_ROOT}/node_modules/@axe-core/playwright" || \
   (cd "${PROJECT_ROOT}" && npm install -D @axe-core/playwright)
 ```
-Reuse `playwright.config.ts` if present. Spec files: `tests/a11y/*.a11y.spec.ts`. Run a11y suite with explicit reporter override so artifacts go to `tests/a11y/`:
+Spec files: `tests/a11y/<domain>/*.a11y.spec.ts` (domain = first segment of route, see Phase 3). Do NOT reuse `playwright.config.ts` (its `testDir` is `tests/ui/e2e` — would miss a11y specs). Write a separate `playwright.a11y.config.ts` with `testDir: './tests/a11y'` and reporter pinned to `tests/a11y/`:
 ```bash
 cd "${PROJECT_ROOT}" && npx playwright test tests/a11y \
   --reporter=json,html \
@@ -87,7 +90,7 @@ Recommended: write `playwright.a11y.config.ts` once (extends `playwright.config.
 python3 -c "import axe_playwright_python" 2>/dev/null || \
   (source "${PROJECT_ROOT}/.venv/bin/activate" 2>/dev/null; pip install axe-playwright-python)
 ```
-Also ensure pytest-playwright + chromium are present (qa-ui-test should have installed them; verify with `python3 -c "import pytest_playwright"`). Create `tests/a11y/` directory if absent. Write `tests/a11y/conftest.py` with the same `browser_context_args` fixture as qa-ui-test (independent conftest — does NOT depend on tests/ui/conftest.py). Spec files: `tests/a11y/test_*.py` using:
+Verify pytest-playwright + chromium are present (env-validator owns installs; if missing → return error `pytest_playwright_missing_after_env_validator`). Create `tests/a11y/<domain>/` sub-dirs (per Phase 3). Write `tests/a11y/conftest.py` with the same `browser_context_args` fixture as qa-ui-test (independent conftest — does NOT depend on tests/ui/conftest.py). Spec files: `tests/a11y/<domain>/test_*.py` using:
 ```python
 from playwright.sync_api import Page
 from axe_playwright_python.sync_playwright import Axe
@@ -105,15 +108,16 @@ def test_home_no_critical_violations(page: Page):
 ## Java/C# branch
 Out of scope v1 → return `status: "skipped_unsupported_language"`.
 
-# Phase 3 — Group pages
+# Phase 3 — Group pages (domain sub-dirs)
 
-Group routes by prefix. File extension/path depends on language:
+Group routes by their domain prefix. Derive sub-dir from the route path's first segment (drop leading `/`). Examples:
 
-| Group | TS/JS path | Python path |
+| Route group | TS/JS path | Python path |
 |---|---|---|
-| `/`, `/home` | `tests/a11y/home.a11y.spec.ts` | `tests/a11y/test_home.py` |
-| `/login`, `/register` | `tests/a11y/auth.a11y.spec.ts` | `tests/a11y/test_auth.py` |
-| `/dashboard`, `/settings` | `tests/a11y/dashboard.a11y.spec.ts` | `tests/a11y/test_dashboard.py` |
+| `/`, `/home` | `tests/a11y/root/home.a11y.spec.ts` | `tests/a11y/root/test_home.py` |
+| `/login`, `/register` | `tests/a11y/auth/login.a11y.spec.ts` | `tests/a11y/auth/test_login.py` |
+| `/dashboard`, `/settings` | `tests/a11y/dashboard/index.a11y.spec.ts` | `tests/a11y/dashboard/test_index.py` |
+| `/payments/checkout` | `tests/a11y/payments/checkout.a11y.spec.ts` | `tests/a11y/payments/test_checkout.py` |
 
 # Phase 4 — Generate per page group
 
@@ -125,7 +129,7 @@ Per group, generate:
 4. **ARIA names on interactive elements** — every button/link has accessible name.
 5. **RTL rendering** (if `html[dir=rtl]` or Hebrew locale detected) — assert `getComputedStyle(body).direction === 'rtl'`.
 
-For full templates, Read `~/.claude/qa-skills-reference/a11y-test-patterns.md`.
+For full templates, Read `${CLAUDE_PLUGIN_ROOT}/reference/a11y-test-patterns.md`.
 
 # Phase 5 — Run
 
@@ -158,4 +162,4 @@ Max 2 iterations.
 
 # Reference
 
-`~/.claude/qa-skills-reference/a11y-test-patterns.md`
+`${CLAUDE_PLUGIN_ROOT}/reference/a11y-test-patterns.md`

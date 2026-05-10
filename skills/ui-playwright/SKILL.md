@@ -21,8 +21,9 @@ Thin trigger skill. Delegates to `qa-skills:qa-ui-test` agent.
 
 1. Detect locale (Hebrew chars → `he`, else `en`).
 2. Resolve `project_root`. Ask once if missing.
-3. Detect dev server URL from `package.json` scripts (next dev → 3000, vite → 5173). Default `http://localhost:3000`.
-4. Invoke `qa-skills:qa-ui-test` agent with:
+3. **Pre-step — env-validator:** invoke `qa-skills:qa-env-validator` with `{categories_enabled: ["ui"], auto_install: true}`. This installs Playwright + browser if missing and surfaces `installs_performed[]`. If `ui` ends up in `categories_removed[]` → abort with the env-validator's reason (e.g., `unsupported_language`). qa-ui-test no longer installs anything itself — env-validator is the single source for installs.
+4. Detect dev server URL from `package.json` scripts (next dev → 3000, vite → 5173). Default `http://localhost:3000`.
+5. Invoke `qa-skills:qa-ui-test` agent with:
    ```json
    {
      "project_root": "...",
@@ -35,6 +36,6 @@ Thin trigger skill. Delegates to `qa-skills:qa-ui-test` agent.
      "budgets": {"max_tokens": 70000, "max_seconds": 600}
    }
    ```
-5. Display agent's `status`, batches completed/skipped, tests passing counts. No test code echoed.
+6. Display agent's `status`, batches completed/skipped, tests passing counts. If env-validator's `installs_performed[]` non-empty → prefix with `📦 הותקן אוטומטית: <list>` (he) / `📦 Auto-installed: <list>` (en) so user knows env was modified.
 
 The agent owns pre-flight, reconnaissance, smoke-first batching, and fix loops.

@@ -21,9 +21,10 @@ Thin trigger skill. Delegates to `qa-skills:qa-security-test` agent.
 
 1. Detect locale.
 2. Resolve `project_root`.
-3. Invoke `qa-skills:qa-code-analyzer` to get modules + routes + warnings.
-4. Detect API server URL.
-5. Invoke `qa-skills:qa-security-test` agent with:
+3. **Pre-step — env-validator:** invoke `qa-skills:qa-env-validator` with `{categories_enabled: ["security"], auto_install: true}`. Installs httpx/supertest if missing. Abort if `security` removed.
+4. Invoke `qa-skills:qa-code-analyzer` to get modules + routes + warnings.
+5. Detect API server URL.
+6. Invoke `qa-skills:qa-security-test` agent with:
    ```json
    {
      "project_root": "...",
@@ -36,6 +37,6 @@ Thin trigger skill. Delegates to `qa-skills:qa-security-test` agent.
      "budgets": {"max_tokens": 80000, "max_seconds": 600}
    }
    ```
-6. Display agent summary including any `vulnerabilities_found`.
+7. Display agent summary including any `vulnerabilities_found`. Surface `installs_performed[]` if non-empty.
 
 The agent owns OWASP test generation and never weakens security assertions.

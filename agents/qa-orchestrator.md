@@ -218,7 +218,7 @@ Then invoke `qa-git-diff-analyzer`. It updates `analysis.json` in-place (adds `d
 
 Then invoke `qa-env-validator`. Pass top-level fields (do NOT bury inside `options`):
 - `auto_install: ${input.options.auto_install ?? true}`
-- `python_async_detected: <bool>` — true when language=="python" AND any module/route in `analysis.modules[].handlers` is `async def` OR `analysis.warnings` includes `async_handler_detected`.
+- `python_async_detected: <bool>` — true when language=="python" AND `analysis.warnings[]` includes `"async_handler_detected"` (code-analyzer Phase 4 emits this warning when any handler is `async def`).
 
 Returns `categories_remaining`, `categories_removed`, `installs_performed`. Update `RunContext.categories_enabled`. Carry `categories_removed` and `installs_performed` into the strategy plan so the user sees what was installed and what was skipped.
 
@@ -312,7 +312,7 @@ Display to user (via stdout — caller skill relays):
 - {modules_total} modules, {modules_changed} השתנו
 - ייוצרו: {categories_planned}
 - ידולג: {categories_skipped_with_reasons}
-- הותקן בזמן הריצה: {installs_performed}   # רק אם env-validator התקין משהו
+- 📦 הותקן אוטומטית: {installs_performed}   # רק אם env-validator התקין משהו (auto_install=true ברירת מחדל)
 - מודלים: {model_breakdown}
 - זמן משוער: ~{minutes} דקות
 - {abort_summary}
@@ -325,14 +325,14 @@ Execution plan (auto):
 - {modules_total} modules, {modules_changed} changed
 - Will generate: {categories_planned}
 - Skipped: {categories_skipped_with_reasons}
-- Installed during run: {installs_performed}   # only if env-validator installed something
+- 📦 Auto-installed: {installs_performed}   # only if env-validator installed something (auto_install=true default)
 - Models: {model_breakdown}
 - Estimated: ~{minutes} minutes
 - {abort_summary}
 - Starting...
 ```
 
-Pull `installs_performed` from env-validator return value. Empty list → omit line entirely.
+Pull `installs_performed` from env-validator return value. Empty list → omit line entirely. When non-empty, prefix with 📦 emoji so user immediately notices something was installed in their environment. Same list also shows up in the final HTML report (section "Auto-installed dependencies") for full audit trail.
 
 If `interactive: true` → use `AskUserQuestion` to confirm before proceeding. Default mode auto-proceeds.
 
@@ -599,4 +599,4 @@ If model override is set, document it in the strategy plan output.
 
 # Reference
 
-Strategy / decision logic detail: see `~/.claude/qa-skills-reference/orchestrator-patterns.md` (load on demand).
+All decision logic is inline above. No external reference file required.

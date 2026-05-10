@@ -19,9 +19,10 @@ Thin trigger skill. Delegates to `qa-skills:qa-contract-test` agent.
 
 1. Detect locale.
 2. Resolve `project_root`.
-3. Invoke `qa-skills:qa-code-analyzer` for routes.
-4. Detect API server URL.
-5. Invoke `qa-skills:qa-contract-test` agent with:
+3. **Pre-step — env-validator:** invoke `qa-skills:qa-env-validator` with `{categories_enabled: ["contract"], auto_install: true}`. Installs ajv/jsonschema if missing and verifies OpenAPI spec presence. Abort if `contract` removed.
+4. Invoke `qa-skills:qa-code-analyzer` for routes.
+5. Detect API server URL.
+6. Invoke `qa-skills:qa-contract-test` agent with:
    ```json
    {
      "project_root": "...",
@@ -32,6 +33,6 @@ Thin trigger skill. Delegates to `qa-skills:qa-contract-test` agent.
      "budgets": {"max_tokens": 60000, "max_seconds": 480}
    }
    ```
-6. Display agent summary + the chosen `mode` (openapi / golden_capture / golden_update).
+7. Display agent summary + the chosen `mode` (openapi / golden_capture / golden_update). Surface `installs_performed[]` if non-empty.
 
 The agent owns mode detection, schema validation, and golden master capture.
