@@ -1,9 +1,9 @@
 """compute_expected_files — sole authority for `tests/<category>/...` layout.
 
 Mirrors the logic previously inlined in `qa-orchestrator.md` Phase 2.5. The
-orchestrator imports this module via `python -m qa_skills.path_planner`. Sub-agents
-must NOT call this — they receive the slice for their category as `expected_files`
-inside the path_contract input.
+orchestrator invokes via wrapper script `skills/_shared/scripts/plan_expected_files.py`.
+Sub-agents must NOT call this — they receive the slice for their category as
+`expected_files` inside the path_contract input.
 """
 
 from __future__ import annotations
@@ -118,7 +118,7 @@ def compute_expected_files(category: str, analysis: Analysis, language: str) -> 
 __all__ = ["compute_expected_files", "DROP_SOURCE_DIRS", "SKIP_FRONTEND_STEMS"]
 
 
-# CLI entry point: python -m qa_skills.path_planner --analysis <path> --category <cat>
+# CLI wrapper: skills/_shared/scripts/plan_expected_files.py
 if __name__ == "__main__":
     import argparse
     import json

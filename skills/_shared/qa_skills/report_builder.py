@@ -225,7 +225,7 @@ def build_report_data(
 __all__ = ["build_report_data", "build_coverage_by_category", "REPORT_DATA_VERSION", "CATEGORY_TO_AGENT"]
 
 
-# CLI: python -m qa_skills.report_builder --inputs <json-path> --out <path>
+# CLI wrapper: skills/_shared/scripts/report_builder.py
 if __name__ == "__main__":
     import argparse
     import sys

@@ -51,7 +51,7 @@ def has_signal(category: str, analysis: Analysis) -> tuple[bool, str]:
 __all__ = ["has_signal"]
 
 
-# CLI: python -m qa_skills.strategy --analysis <path> --category <c>
+# CLI wrapper: skills/_shared/scripts/strategy.py
 if __name__ == "__main__":
     import argparse
     import json

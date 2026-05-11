@@ -106,7 +106,7 @@ def run_final_gate(report_data_path: str | Path, project_root: str | Path, run_i
 __all__ = ["run_final_gate"]
 
 
-# CLI entry: python -m qa_skills.final_gate --report-data <path> --project-root <path> --run-id <id>
+# CLI wrapper: skills/_shared/scripts/final_gate.py
 if __name__ == "__main__":
     import argparse
     import sys

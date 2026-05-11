@@ -161,7 +161,7 @@ def detect_flaky(
 __all__ = ["detect_flaky", "CAUSE_HINTS", "FIX_HINTS_EN", "FIX_HINTS_HE"]
 
 
-# CLI: python -m qa_skills.flaky --project-root <path> --language <lang>
+# CLI wrapper: skills/_shared/scripts/flaky.py
 if __name__ == "__main__":
     import argparse
 

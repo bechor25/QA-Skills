@@ -52,14 +52,18 @@ def test_api_partial_coverage_real_units(fastapi):
 
 
 def test_unit_coverage_uses_module_paths(fastapi):
+    """Controllers excluded from unit universe (covered by api/ui)."""
     outputs = [
         {"path": "tests/unit/main/test_main.py", "covers": ["app/main.py"]},
         {"path": "tests/unit/auth/test_auth.py", "covers": ["app/auth.py"]},
     ]
     cov = compute_coverage("unit", outputs, fastapi)
-    assert cov["total"] == 5
-    assert cov["pct"] == 40   # 2/5
+    # universe = {main, auth, users, calc} — routes.py (controller) is filtered.
+    assert cov["total"] == 4
+    assert cov["pct"] == 50   # 2/4
     assert sorted(cov["covered_items"]) == ["app/auth.py", "app/main.py"]
+    assert "app/routes.py" not in cov["covered_items"]
+    assert "app/routes.py" not in cov["missing_items"]
 
 
 def test_ui_coverage_uses_page_paths(fastapi):

@@ -147,7 +147,7 @@ def update_analysis(analysis_path: str | Path, project_root: str | Path | None =
 __all__ = ["DIFF_CLASS", "classify_diff", "update_analysis"]
 
 
-# CLI: python -m qa_skills.git_diff --analysis <path>
+# CLI wrapper: skills/_shared/scripts/git_diff.py
 if __name__ == "__main__":
     import argparse
     import sys

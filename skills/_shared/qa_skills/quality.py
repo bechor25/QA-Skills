@@ -42,7 +42,7 @@ def compute_quality_score(
 __all__ = ["compute_quality_score", "WEIGHTS", "MAX_SCORE", "MIN_SCORE"]
 
 
-# CLI: python -m qa_skills.quality --report-data <path>
+# CLI wrapper: skills/_shared/scripts/quality.py
 if __name__ == "__main__":
     import argparse
     import json

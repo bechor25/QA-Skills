@@ -270,7 +270,7 @@ def write_html_report(report_data: dict, out_path: str | Path) -> Path:
 __all__ = ["render_html", "write_html_report"]
 
 
-# CLI: python -m qa_skills.html_render --report-data <path> --out <path>
+# CLI wrapper: skills/_shared/scripts/html_render.py
 if __name__ == "__main__":
     import argparse
     import sys

@@ -149,7 +149,10 @@ class Analysis:
         )
 
     def api_routes(self) -> Iterable[Route]:
-        return (r for r in self.routes if r.kind == "api")
+        # Framework-internal endpoints (FastAPI auto-spec, Swagger UI) are not
+        # real product APIs — exclude from test planning + coverage universe.
+        skip = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+        return (r for r in self.routes if r.kind == "api" and r.path not in skip)
 
     def page_routes(self) -> Iterable[Route]:
         return (r for r in self.routes if r.kind == "page")
@@ -159,7 +162,10 @@ class Analysis:
         return (f for f in self.frontend_files if f.kind in page_kinds)
 
     def non_frontend_modules(self) -> Iterable[Module]:
-        return (m for m in self.modules if m.type != "frontend")
+        # Controllers are covered by api/ui categories — a `TestClient`-based
+        # "unit" file for a controller duplicates those tests verbatim.
+        skip_types = {"frontend", "controller"}
+        return (m for m in self.modules if m.type not in skip_types)
 
 
 @dataclass(frozen=True)

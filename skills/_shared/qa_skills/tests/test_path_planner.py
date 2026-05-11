@@ -40,14 +40,16 @@ def _paths(efs):
 # ---------- Python FastAPI ----------
 
 def test_unit_python_fastapi(fastapi):
+    """Controllers (routes.py) excluded — TestClient `unit` tests for controllers
+    duplicate api/ui categories. main.py is a service in this fixture, kept."""
     paths = _paths(compute_expected_files("unit", fastapi, "python"))
     assert paths == [
         "tests/unit/main/test_main.py",
-        "tests/unit/routes/test_routes.py",
         "tests/unit/auth/test_auth.py",
         "tests/unit/users/test_users.py",
         "tests/unit/calc/test_calc.py",
     ]
+    assert "tests/unit/routes/test_routes.py" not in paths
 
 
 def test_api_python_fastapi(fastapi):
@@ -129,13 +131,14 @@ def test_unit_never_collapses_to_root_root(fastapi):
 # ---------- TS/JS Express ----------
 
 def test_unit_typescript(express):
+    """Controllers excluded — see test_unit_python_fastapi for rationale."""
     paths = _paths(compute_expected_files("unit", express, "typescript"))
     assert paths == [
         "tests/unit/auth/login.test.ts",
         "tests/unit/users/manager.test.ts",
-        "tests/unit/routes/auth.test.ts",
-        "tests/unit/routes/users.test.ts",
     ]
+    assert "tests/unit/routes/auth.test.ts" not in paths
+    assert "tests/unit/routes/users.test.ts" not in paths
 
 
 def test_api_typescript(express):
@@ -190,3 +193,52 @@ def test_api_covers_format(fastapi):
             method, path = c.split(" ", 1)
             assert method in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"), c
             assert path.startswith("/"), c
+
+
+# ---------- framework-internal routes filtered ----------
+
+@pytest.fixture
+def fastapi_with_openapi(fastapi):
+    """Clone the FastAPI fixture, append framework-internal /openapi.json + /docs."""
+    from qa_skills.types import Analysis, Route
+    extra = (
+        Route(method="GET", path="/openapi.json", handler="", file="app/main.py",
+              kind="api", produces="json", source="fastapi"),
+        Route(method="GET", path="/docs", handler="", file="app/main.py",
+              kind="api", produces="html", source="fastapi"),
+        Route(method="GET", path="/redoc", handler="", file="app/main.py",
+              kind="api", produces="html", source="fastapi"),
+    )
+    return Analysis(
+        language=fastapi.language,
+        project_root=fastapi.project_root,
+        scanned_at=fastapi.scanned_at,
+        modules=fastapi.modules,
+        routes=fastapi.routes + extra,
+        frontend_files=fastapi.frontend_files,
+        frontend_kind=fastapi.frontend_kind,
+        frontend_dev_server=fastapi.frontend_dev_server,
+        backend_dev_server=fastapi.backend_dev_server,
+        server_hint=fastapi.server_hint,
+        stats=fastapi.stats,
+        warnings=fastapi.warnings,
+    )
+
+
+@pytest.mark.parametrize("category", ["api", "security", "contract"])
+def test_framework_internal_routes_filtered(fastapi_with_openapi, category):
+    """/openapi.json /docs /redoc must NEVER appear in expected_files —
+    FastAPI auto-generates them, not real product APIs."""
+    paths = _paths(compute_expected_files(category, fastapi_with_openapi, "python"))
+    forbidden = ("openapi.json", "docs", "redoc")
+    for p in paths:
+        for f in forbidden:
+            assert f"/{f}/" not in p, f"{category}: framework-internal route leaked into {p}"
+
+
+def test_api_routes_iter_excludes_openapi(fastapi_with_openapi):
+    api_paths = {r.path for r in fastapi_with_openapi.api_routes()}
+    assert "/openapi.json" not in api_paths
+    assert "/docs" not in api_paths
+    assert "/redoc" not in api_paths
+    assert "/api/login" in api_paths   # still kept

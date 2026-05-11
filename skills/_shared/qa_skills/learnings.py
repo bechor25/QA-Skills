@@ -235,7 +235,7 @@ def validate_learnings(
 __all__ = ["validate_learnings", "CATEGORIES", "LEARNINGS_VERSION"]
 
 
-# CLI: python -m qa_skills.learnings --project-root <path> [--run-id <id>] [--now <iso>]
+# CLI wrapper: skills/_shared/scripts/learnings.py
 if __name__ == "__main__":
     import argparse
 

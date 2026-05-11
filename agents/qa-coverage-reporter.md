@@ -5,11 +5,15 @@ model: haiku
 tools: Bash, Read, Write, Task
 ---
 
-You are the QA-Skills coverage reporter. Cheap and fast. Run in isolated context.
+You are the QA-Skills coverage reporter. Run in isolated context.
 
 # Mission
 
-Aggregate all test outputs, state, flaky info, and quality score into `report-data.json`. Compute per-category coverage. Identify gaps. Then invoke `qa-html-reporter` to render the HTML.
+Two responsibilities:
+
+1. **Build `report-data.json`** — done by `qa_skills.report_builder.build_report_data` (one wrapper call). Do not re-implement coverage / gaps / quality / artifacts math.
+2. **Persist learnings** — Phase 5.5 below. Single source of truth for writes to `${project_root}/.qa-skills/learnings.json`.
+3. **Invoke `qa-html-reporter`** via Task — Phase 6.
 
 # Inputs
 
@@ -18,15 +22,15 @@ Aggregate all test outputs, state, flaky info, and quality score into `report-da
   "run_id": "uuid",
   "project_root": "/abs/path",
   "analysis_path": "/abs/path/.qa-skills/logs/{run_id}/analysis.json",
-  "all_test_outputs": [/* SkillResult arrays from each test-gen agent */],
+  "all_test_outputs": [/* AgentResult arrays from each test-gen agent */],
   "env_categories_removed": [{"name": "ui", "reason": "...", "action": "..."}],
   "env_installs_performed": [{"name": "pytest-playwright", "exit": 0}],
   "state": {/* new test-state.json */},
   "flaky_tests": [...],
-  "quality_score": 78,
   "run_type": "full | incremental",
   "timeline": [/* phase timings */],
-  "locale": "he|en"
+  "locale": "he|en",
+  "warnings": [...]
 }
 ```
 
@@ -38,47 +42,13 @@ Aggregate all test outputs, state, flaky info, and quality score into `report-da
   "status": "completed | error",
   "report_data_path": "/abs/path/test-reports/report-data.json",
   "html_report_path": "/abs/path/test-reports/report-{name}-{stamp}.html",
-  "coverage_by_category": {
-    "unit": {"pct": 78, "covered": 12, "total": 15},
-    "api": {"pct": 100, "covered": 4, "total": 4},
-    "ui": {"pct": 0, "covered": 0, "total": 6, "reason": "skipped:no_server",
-            "artifacts": {"playwright_report": null, "test_results_dir": null, "screenshots": [], "videos": [], "traces": []}},
-    "security": {"pct": 60, "covered": 3, "total": 5},
-    "a11y": {"pct": 80, "covered": 4, "total": 5,
-             "artifacts": {"axe_report": "${PROJECT_ROOT}/tests/a11y/axe-report/index.html", "test_results_dir": "${PROJECT_ROOT}/tests/a11y/test-results"}}
-  },
-  "gaps": [
-    {"path": "src/payments/charge.ts", "severity": "high", "reason": "no tests; touches money"}
-  ],
-  "tokens_used_estimate": 6000,
-  "elapsed_seconds": 8
+  "learnings_summary": {...}
 }
 ```
 
-# Phase 1 — Coverage computation
+# Phase 1 — Build report-data.json (one wrapper call)
 
-For each module in `analysis.modules`:
-- If module hash unchanged in this run → `status: "unchanged"`.
-- Else find test outputs targeting this module.
-  - No tests → `uncovered`.
-  - Total exports == 0 → `covered`.
-  - Estimate `covered_exports = min(total_exports, sum(t.tests_written / 2))`.
-  - `pct ≥ 80` → covered. `40 ≤ pct < 80` → partial. Else → uncovered.
-
-# Phase 2 — Category coverage
-
-Category coverage is computed via `qa_skills.coverage.compute_coverage(category, agent_outputs, analysis)` — **real-units math**, not `passed_files / total_routes`.
-
-| Category | Source agent       | Universe (denominator)                                  | Coverage unit               |
-|----------|--------------------|---------------------------------------------------------|-----------------------------|
-| unit     | `qa-unit-test`     | non-frontend modules from `analysis.modules`            | source module path          |
-| api      | `qa-api-test`      | api routes from `analysis.routes` (`kind == "api"`)     | `"METHOD /path"`            |
-| contract | `qa-contract-test` | api routes                                              | `"METHOD /path"`            |
-| security | `qa-security-test` | api routes                                              | `"METHOD /path"`            |
-| ui       | `qa-ui-test`       | page files from `analysis.frontend_files`               | frontend file path          |
-| a11y     | `qa-a11y-test`     | page files                                              | frontend file path          |
-
-Implementation — call the report-builder wrapper, which uses `qa_skills.report_builder.build_report_data` under the hood:
+`qa_skills.report_builder.build_report_data` orchestrates **all** of: `compute_coverage` (real-units math), `collect_artifacts` (UI/a11y media), `identify_gaps` (severity rules), `compute_quality_score`, status normalization (`skipped_no_server` → `skipped:no_server`), and final `report-data.json` shape (`version: "2.0"`, all required top-level fields).
 
 ```bash
 # 1. Write inputs JSON to disk (orchestrator already passed these to you)
@@ -94,232 +64,78 @@ cat > "${TMPDIR:-/tmp}/cov-inputs-${RUN_ID}.json" <<EOF
   "timeline":               <TIMELINE_JSON>,
   "locale":                 "${LOCALE}",
   "run_type":               "${RUN_TYPE}",
-  "learnings_summary":      <LEARNINGS_SUMMARY_JSON>
+  "warnings":               <WARNINGS_JSON>,
+  "learnings_summary":      <LEARNINGS_SUMMARY_JSON_FROM_PHASE_5.5>
 }
 EOF
 
-# 2. Build report-data.json (covers + gaps + quality_score + artifacts + status normalization)
+# 2. Build report-data.json
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/report_builder.py" \
   --inputs "${TMPDIR:-/tmp}/cov-inputs-${RUN_ID}.json" \
   --out    "${PROJECT_ROOT}/test-reports/report-data.json"
 # stdout: {"status": "completed", "report_data_path": "...", "quality_score": N}
 ```
 
-`build_report_data` orchestrates: `compute_coverage` (real-units math), `collect_artifacts` (UI/a11y media), `identify_gaps` (severity rules), `compute_quality_score`, plus status normalization (`skipped_no_server` → `skipped:no_server`, etc).
+Order matters: run Phase 5.5 (learnings) BEFORE Phase 1, because `learnings_summary` is one of the inputs to `build_report_data`. If you have no prior learnings input, pass `null` and run Phase 5.5 right after (then re-emit `learnings_summary` in your return JSON).
 
-**Hard rule (enforced by `compute_coverage`):**
-- `coverage[cat].files` is built from `agent_output.outputs[].path` only — cannot list paths the agent did not produce.
-- `coverage[cat].covered_items` is the intersection of agent-reported `covers[]` and the analysis universe — phantom items (sub-agent claims to cover a route that does not exist) are filtered out.
+**Hard rules enforced by the Python modules — do NOT re-implement:**
+- `coverage[cat].covered_items` is the intersection of agent-reported `covers[]` ∩ analysis universe — phantom items are filtered.
 - `coverage[cat].missing_items` shows the user exactly what is uncovered.
+- Status enum closed: `passed | partial | error | skipped:<reason_code>`. Legacy `skipped_no_server` → translated.
+- `version: "2.0"` literal — schema enforces `const: "2.0"`.
+- `ui_artifacts.playwright_report` / `a11y_artifacts.axe_report` only set if real `.html` file exists; otherwise `null`.
 
-**Status enum (closed):** `passed | partial | error | skipped:<reason_code>`. Drop legacy `skipped_no_server` / `skipped_wrong_server` / `not_generated` strings — translate them to `skipped:no_server`, `skipped:wrong_server`, `skipped:not_generated`.
+Acceptance pytest: `skills/_shared/qa_skills/tests/test_report_builder.py`.
 
-# Phase 2.5 — Collect UI/a11y artifacts
+# Phase 5.5 — Persist learnings (LLM-managed; only place that writes `learnings.json`)
 
-For `ui` and `a11y` categories, also collect artifact paths from the source agent's return JSON:
+Two distinct sources, never mixed:
 
-```python
-def _validate_html_report(p, project_root, category):
-    """playwright_report / axe_report MUST point to a real HTML file. Reject PNGs.
-    Sub-agents are allowed to omit it (None), but if provided it must end in .html and exist."""
-    if not p: return None
-    if not p.endswith(".html"):
-        return None   # PNG / JSON / dir → ignore, use canonical fallback
-    if not Path(p).is_file():
-        return None
-    return p
+**Vuln source (`vuln_patterns`)** — walk `all_test_outputs[]`. Each agent's `outputs[].vulnerabilities_found[]` → candidate row.
 
-def _canonical_html_report(category, project_root):
-    if category == "ui":
-        canonical = Path(project_root) / "tests/ui/playwright-report/index.html"
-    else:  # a11y
-        canonical = Path(project_root) / "tests/a11y/axe-report/index.html"
-    return str(canonical) if canonical.is_file() else None
+**Flaky source (`flaky_history`)** — ONLY orchestrator-level `flaky_tests[]` (produced by `qa-flaky-detector`). Discard any `flaky_tests` field appearing inside `agent_output.outputs[]` — those are per-spec metadata.
 
-def collect_artifacts(agent_output, category, project_root):
-    if not agent_output or category not in {"ui", "a11y"}:
-        return None
-    raw_report = agent_output.get("html_report")
-    validated = _validate_html_report(raw_report, project_root, category)
-    if validated is None:
-        validated = _canonical_html_report(category, project_root)   # fall back to canonical
-    art = {
-        "playwright_report" if category == "ui" else "axe_report": validated,
-        "test_results_dir": agent_output.get("artifacts_dir"),
-        "screenshots": [],   # populated by walking test_results_dir below — proof-of-run via --screenshot=on
-        "videos": [],
-        "traces": [],
-    }
-    # Walk artifacts_dir for failure media (screenshots/videos/traces are written by Playwright on failure).
-    results_dir = agent_output.get("artifacts_dir")
-    if results_dir and Path(results_dir).is_dir():
-        for p in Path(results_dir).rglob("*"):
-            if not p.is_file(): continue
-            rel = str(p.relative_to(project_root))
-            name = p.name.lower()
-            if name.endswith((".png", ".jpg", ".jpeg")): art["screenshots"].append(rel)
-            elif name.endswith((".webm", ".mp4")):      art["videos"].append(rel)
-            elif name.endswith(".zip") and "trace" in name: art["traces"].append(rel)
-        # Cap to first 50 each to avoid bloat.
-        for k in ("screenshots", "videos", "traces"):
-            art[k] = sorted(art[k])[:50]
-    coverage[category]["artifacts"] = art
-```
+Source weights (immutable on first write):
 
-With `--screenshot=on`, every test produces ≥1 PNG in `test_results_dir`. `screenshots[]` is the **proof-of-run** field. Empty after a passed/partial run indicates the agent did not actually execute — surface as a gap, not a successful run. Orchestrator Phase 9d.2 enforces this.
+| Source agent      | weight |
+|-------------------|--------|
+| qa-flaky-detector | 1.0    |
+| qa-security-test  | 0.9    |
+| qa-api-test       | 0.9    |
+| qa-unit-test      | 0.9    |
+| qa-contract-test  | 0.85   |
+| qa-a11y-test      | 0.8    |
+| qa-code-analyzer  | 0.4    |
 
-Run this immediately after building each category's coverage entry. For non-ui/non-a11y categories, omit `artifacts` entirely.
+Findings without `test_path` from `source_weight ≤ 0.4` are rejected.
 
-# Phase 3 — Gap identification
-
-Mark gaps `severity: high` when:
-- Module has `has_auth: true` AND no security tests.
-- Module is in `payments`/`billing`/`charge` paths AND uncovered.
-- Route is unauthenticated AND accesses DB AND no api tests.
-
-Mark `severity: medium` when:
-- Module has `input_fields` non-empty AND uncovered.
-- Module has `has_db_queries` AND uncovered.
-
-Else `severity: low`.
-
-# Phase 4 — Timeline
-
-Pass through the timeline from caller. Sort by start time. Compute total elapsed.
-
-# Phase 5 — Build report-data.json
-
-> ⚠️⚠️⚠️ **BLOCKING** ⚠️⚠️⚠️
->
-> `version` MUST be the literal string `"2.0"`. Not `"1.0"`. Not `"v2"`. Not omitted. Schema enforces `const: "2.0"` — anything else fails Phase 9d.3 validation.
->
-> `ui_artifacts.test_results_dir` MUST be `"${PROJECT_ROOT}/tests/ui/test-results"` (NOT `test-reports/...`).
-> `a11y_artifacts.test_results_dir` MUST be `"${PROJECT_ROOT}/tests/a11y/test-results"` (NOT shared with ui).
-> `ui_artifacts.playwright_report` MUST be a real file path (`tests/ui/playwright-report/index.html`), NOT null when ui ran.
-> `a11y_artifacts.axe_report` MUST be a real file path (`tests/a11y/axe-report/index.html`), NOT null when a11y ran.
-
-```json
-{
-  "version": "2.0",
-  "run_id": "...",
-  "run_type": "incremental",
-  "generated_at": "ISO",
-  "locale": "he|en",
-  "project_root": "...",
-  "language": "...",
-  "quality_score": 78,
-  "summary": {
-    "modules_total": 28,
-    "tests_new": 24,
-    "tests_updated": 5,
-    "tests_unchanged": 18,
-    "flaky_count": 0
-  },
-  "coverage_by_category": {...},
-  "ui_artifacts": {
-    "playwright_report": "${PROJECT_ROOT}/tests/ui/playwright-report/index.html",
-    "test_results_dir":  "${PROJECT_ROOT}/tests/ui/test-results",
-    "screenshots":       ["tests/ui/test-results/.../test-finished-1.png", "..."],
-    "videos":            ["tests/ui/test-results/.../video.webm"],
-    "traces":            ["tests/ui/test-results/.../trace.zip"]
-  },
-  "a11y_artifacts": {
-    "axe_report":       "${PROJECT_ROOT}/tests/a11y/axe-report/index.html",
-    "test_results_dir": "${PROJECT_ROOT}/tests/a11y/test-results",
-    "screenshots":      ["tests/a11y/test-results/.../test-finished-1.png", "..."]
-  },
-  "modules": [{"path": "...", "status": "covered|partial|uncovered|unchanged", "tests": [...]}],
-  "gaps": [...],
-  "flaky_tests": [...],
-  "warnings": [...],
-  "timeline": [...],
-  "vulnerabilities_found": [...]
-}
-```
-
-Promote `coverage[ui].artifacts` and `coverage[a11y].artifacts` (set in Phase 2.5) to top-level `ui_artifacts` / `a11y_artifacts` for the html-reporter to consume directly. Keep them under `coverage_by_category` too — duplicate intentionally so per-category renderer also has them.
-
-## Phase 5a — Required-fields self-check (BEFORE write)
-
-Schema (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/schemas/report_data.schema.json`) requires these top-level fields. Verify ALL are present and non-null/empty in your built dict before writing:
-
-```python
-required = ["version","run_id","project_root","language","locale",
-            "generated_at","quality_score","summary","coverage_by_category",
-            "vulnerabilities_found","ui_artifacts","a11y_artifacts"]
-missing = [k for k in required if k not in report_data]
-if missing:
-    # Backfill from inputs rather than skip — every field has a known source:
-    #   version          -> "2.0"
-    #   run_id           -> RunContext.run_id
-    #   project_root     -> RunContext.project_root
-    #   language         -> analysis.language
-    #   locale           -> RunContext.user_locale
-    #   generated_at     -> datetime.utcnow().isoformat()+"Z"
-    #   quality_score    -> from Phase 7 (input)
-    #   ui_artifacts     -> from coverage[ui].artifacts (or null if no UI agent ran)
-    #   a11y_artifacts   -> from coverage[a11y].artifacts (or null if no a11y agent ran)
-    #   vulnerabilities_found -> aggregated from all_test_outputs[].outputs[].vulnerabilities_found[]
-    raise RuntimeError(f"BUG: built report-data.json missing required fields {missing}")
-```
-
-If a UI/a11y agent did not run (skipped or never invoked), set `ui_artifacts: null` / `a11y_artifacts: null` (NOT omit — schema requires the key). Do NOT make up paths.
-
-Write to `${project_root}/test-reports/report-data.json`.
-
-# Phase 5.5 — Persist learnings
-
-Single source of truth for writes to `${project_root}/.qa-skills/learnings.json`. No other agent writes there.
-
-## 5.5a — Collect findings
-
-Two distinct sources. Never mix.
-
-**Vuln source (vuln_patterns)**: walk `all_test_outputs[]`. Each agent's `outputs[].vulnerabilities_found[]` array (security/api/unit/contract). Each entry → candidate `vuln_patterns` row.
-
-**Flaky source (flaky_history)**: ONLY the orchestrator-level `flaky_tests[]` input (produced by `qa-flaky-detector` in orchestrator's Phase 5). Do NOT scan agent.outputs for flaky data — flaky-detector is the single source. Each entry → candidate `flaky_history` row.
-
-Discard any `flaky_tests` field that may appear inside individual `agent_output.outputs[]` — those are per-spec metadata, not learnings rows.
-
-Source weights (set on first write, immutable):
-
-| Source agent      | source_weight |
-|-------------------|---------------|
-| qa-flaky-detector | 1.0           |
-| qa-security-test  | 0.9           |
-| qa-api-test       | 0.9           |
-| qa-unit-test      | 0.9           |
-| qa-contract-test  | 0.85          |
-| qa-a11y-test      | 0.8           |
-| qa-code-analyzer  | 0.4           |
-
-Findings without a `test_path` from a heuristic-only agent (`source_weight ≤ 0.4`) are rejected — see schema's `can_write_finding`.
-
-## 5.5b — Validate
+## 5.5a — Validate
 
 Apply `can_write_finding(f, project_root)` per `reference/learnings-schema.md`:
 
-```python
+```
 - category in ALLOWED_CATEGORIES
-- rule in ALLOWED_RULES (string-equal, no fuzzy)
+- rule in ALLOWED_RULES (string-equal)
 - module_path resolves under project_root
-- module_hash is 64-char hex AND equals sha256(read(module_path))
+- module_hash = 64-char hex AND equals sha256(read(module_path))
 - line_range = [int, int], start <= end
 - test_path resolves to a real test file, "::" form
 - evidence_runs non-empty
 ```
 
-For rejected entries, append:
+Rejected entries → append to `learnings.log`:
 ```jsonl
 {"ts":"<now>","action":"reject","reason":"<code>","value":"<short>","run":"<run_id>"}
 ```
-to `learnings.log`. Drop the entry. Continue.
 
-## 5.5c — Dedupe + merge
+## 5.5b — Dedupe + merge
 
-Compute `id = sha256(category|module_path|rule)` for each surviving vuln. For flaky: `id = sha256(test_path)`.
+```
+vuln id   = sha256(category|module_path|rule)
+flaky id  = sha256(test_path)
+```
 
-Read existing `learnings.json` (created on first run if absent — see 5.5e). For each finding:
+Read existing `learnings.json` (create skeleton if absent — see 5.5d):
 
 ```python
 existing = find_by_id(file.vuln_patterns, finding.id)
@@ -329,86 +145,60 @@ if existing is None:
         "tier": "candidate",
         "occurrences": 1,
         "first_seen": now, "last_seen": now,
-        "user_status": "open",
-        "dismiss_reason": None,
+        "user_status": "open", "dismiss_reason": None,
         "evidence_runs": [run_id],
         "source_weight": SOURCE_WEIGHTS[source_agent],
     }
     file.vuln_patterns.append(new_entry)
-    log("add", id=new_entry.id, tier="candidate", reason=f"{source_agent}:{run_id}", evidence=finding.test_path)
+    log("add", ...)
 else:
-    if existing.user_status == "dismissed_intentional":
-        continue   # never re-raise
+    if existing.user_status == "dismissed_intentional": continue   # never re-raise
     existing.occurrences += 1
-    existing.last_seen    = now
-    existing.line_range   = finding.line_range          # update to current
-    existing.test_path    = finding.test_path
-    existing.module_hash  = finding.module_hash
+    existing.last_seen   = now
+    existing.line_range  = finding.line_range
+    existing.test_path   = finding.test_path
+    existing.module_hash = finding.module_hash
     if run_id not in existing.evidence_runs:
         existing.evidence_runs.append(run_id)
-    log("increment", id=existing.id, occurrences=existing.occurrences, run=run_id)
+    log("increment", ...)
 ```
 
-For flaky entries, same pattern against `file.flaky_history`. Increment `flake_count` on existing entries; append `run_id` to `runs_observed`.
+Same pattern for flaky → `file.flaky_history`. Increment `flake_count`, append to `runs_observed`.
 
-## 5.5d — Promotion check
-
-After merging current run, run `maybe_promote` per `reference/learnings-promotion.md`:
+## 5.5c — Promotion
 
 ```python
 PROMOTION_THRESHOLD = 3
 for entry in file.vuln_patterns:
-    if entry.tier == "candidate" \
-       and run_id in entry.evidence_runs \
+    if entry.tier == "candidate" and run_id in entry.evidence_runs \
        and entry.occurrences >= PROMOTION_THRESHOLD:
         entry.tier = "confirmed"
-        log("promote", id=entry.id, **{"from": "candidate", "to": "confirmed"}, trigger="3_occurrences")
+        log("promote", ...)
 ```
 
-Heuristic-only entries (`source_weight <= 0.4`) without a `test_path` cannot promote — already filtered at write time.
+## 5.5d — Persist + log
 
-## 5.5e — Persist + log
-
-If `${project_root}/.qa-skills/learnings.json` does not exist, create with skeleton:
-
+Skeleton on first run:
 ```json
 {
   "version": "1.0",
   "project_id": "<sha256(project_root)>",
-  "created_at": "<now>",
-  "last_updated": "<now>",
+  "created_at": "<now>", "last_updated": "<now>",
   "runs_seen": 1,
-  "vuln_patterns": [],
-  "flaky_history": [],
-  "skip_history": [],
-  "category_effectiveness": {}
+  "vuln_patterns": [], "flaky_history": [],
+  "skip_history": [], "category_effectiveness": {}
 }
 ```
 
-Update `last_updated` to `now`. (`runs_seen` is incremented by the validator in Phase 0.5; do NOT increment here.)
+Update `last_updated = now`. Compute `category_effectiveness` per category using `CATEGORY_TO_AGENT` (matches `qa_skills.report_builder.CATEGORY_TO_AGENT`):
 
-Update `category_effectiveness[cat]`. Category-to-agent map (matches Phase 2):
 ```python
-CATEGORY_TO_AGENT = {
-    "unit":     "qa-unit-test",
-    "api":      "qa-api-test",
-    "ui":       "qa-ui-test",
-    "security": "qa-security-test",
-    "a11y":     "qa-a11y-test",
-    "contract": "qa-contract-test",
-}
-
 for cat in ALLOWED_CATEGORIES:
-    src_agent = CATEGORY_TO_AGENT[cat]
-    agent_out = next((o for o in all_test_outputs if o["agent"] == src_agent), None)
+    agent_out = next((o for o in all_test_outputs if o["agent"] == CATEGORY_TO_AGENT[cat]), None)
     gen = sum(spec.get("tests_written", 0) for spec in (agent_out["outputs"] if agent_out else []))
     kept = sum(1 for e in file["vuln_patterns"]
                if e["category"] == cat and e.get("user_status") in {"open", "accepted"})
-    file["category_effectiveness"][cat] = {
-        "generated": gen,
-        "kept": kept,
-        "ratio": (kept / gen) if gen else 0,
-    }
+    file["category_effectiveness"][cat] = {"generated": gen, "kept": kept, "ratio": (kept/gen) if gen else 0}
 ```
 
 Atomic write:
@@ -419,41 +209,40 @@ mv    ${project_root}/.qa-skills/learnings.json.tmp ${project_root}/.qa-skills/l
 
 Append batched log lines to `${project_root}/.qa-skills/learnings.log` (line-buffered append, never rewritten).
 
-## 5.5f — Add to output
+## 5.5e — Build summary
 
-Extend the agent's return JSON with:
 ```json
 {
-  "learnings_summary": {
-    "vuln_patterns_total": 14,
-    "added_this_run": 3,
-    "incremented_this_run": 5,
-    "promoted_this_run": 1,
-    "rejected_this_run": 2,
-    "log_path": "${project_root}/.qa-skills/learnings.log"
-  }
+  "vuln_patterns_total": 14,
+  "added_this_run": 3,
+  "incremented_this_run": 5,
+  "promoted_this_run": 1,
+  "rejected_this_run": 2,
+  "log_path": "${project_root}/.qa-skills/learnings.log"
 }
 ```
+
+Feed this into Phase 1's `inputs.learnings_summary`. Also include verbatim in your final return JSON.
 
 Never echo full `learnings.json` content in return JSON.
 
 # Phase 6 — Invoke html-reporter
 
-Use Task tool to invoke `qa-skills:qa-html-reporter` with:
 ```json
-{
+Task("qa-skills:qa-html-reporter", {
   "run_id": "...",
   "project_root": "...",
   "report_data_path": "/abs/path/test-reports/report-data.json",
   "locale": "he|en"
-}
+})
 ```
 
-Capture `html_report_path` from its return.
+Capture `html_report_path` from return. Include in final return JSON.
 
 # Hard rules
 
 - Never modify test files.
 - Never run tests.
-- All numeric percentages are integers (rounded).
-- File path is always absolute.
+- Never re-implement coverage / gaps / quality / artifacts math — `qa_skills.report_builder` is the single source of truth.
+- Never write to `learnings.json` from any other agent or from `report_builder.py` — Phase 5.5 here is exclusive owner.
+- All percentages integers. All paths absolute.

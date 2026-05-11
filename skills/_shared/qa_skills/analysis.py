@@ -116,7 +116,7 @@ __all__ = [
 ]
 
 
-# CLI entry point: python -m qa_skills.analysis --analysis <path>
+# CLI wrapper: skills/_shared/scripts/validate_analysis.py
 if __name__ == "__main__":
     import argparse
     import sys
