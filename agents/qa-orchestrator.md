@@ -376,13 +376,48 @@ If `interactive: true` → use `AskUserQuestion` to confirm before proceeding. D
 
 Save plan JSON to `${logs_dir}/strategy.json`. Write checkpoint(2.5).
 
+# Phase 2.7 — Domain learn (per planned category)
+
+Before dispatch, run `qa-domain-analyzer` ONCE per planned category. This
+produces `${logs_dir}/domain_brief_<category>.json` files that downstream
+test-gen sub-agents slice per batch. Without this phase the sub-agents fall
+back to generic "401 without auth" templates — the original quality gap.
+
+```python
+# Phase 2.7 — Domain learn
+for cat in plan["summary"]["categories_planned"]:
+    brief_input = {
+        "run_id":         run_id,
+        "project_root":   project_root,
+        "category":       cat,
+        "language":       analysis.language,
+        "logs_dir":       str(logs_dir),
+        "expected_files": expected_files_by_cat[cat],
+        "analysis_excerpt": {
+            "modules":         slice_modules_for_category(analysis, cat),
+            "routes":          slice_routes_for_category(analysis, cat),
+            "frontend_files":  list(analysis.page_files()) if cat in ("ui","a11y") else [],
+        },
+    }
+    brief_result = Task("qa-domain-analyzer", brief_input)
+    # qa-domain-analyzer writes ${logs_dir}/domain_brief_<cat>.json atomically.
+    # If it errored, we still proceed — sub-agents emit warning domain_brief_missing.
+    if brief_result.get("status") == "error":
+        warnings.append(f"domain_brief_unavailable:{cat}:{brief_result.get('reason','')}")
+```
+
+Briefs are computed ONCE per category and reused across all batches within
+that category (the dispatch loop slices them per batch in Phase 3).
+
+Write checkpoint(2.7).
+
 # Phase 3 — Dispatch (parallel)
 
 Invoke applicable test-generation agents **in parallel** by issuing multiple Task calls in a single response. Each agent runs in its own isolated context.
 
 Decision matrix — **`plan["summary"]["categories_planned"]` from Phase 2.5 is the sole authority.** Do not re-derive signal or server gates here. Phase 2.5 already applied `has_signal` for unit/api/security/contract and `decide_category` (incl. server matrix) for ui/a11y.
 
-Each planned category is dispatched **in batches** when its `expected_files` count exceeds what fits in `per_agent_timeout_seconds` (A5 + A5.b). The batch_state file makes re-runs idempotent: a killed orchestrator resumes from the first incomplete batch.
+Each planned category is dispatched **in batches** when its `expected_files` count exceeds what fits in `per_agent_timeout_seconds`. The `batch_state.json` file makes re-runs idempotent: a killed orchestrator resumes from the first incomplete batch.
 
 ```python
 # qa_skills.budget supplies: estimate_fit, split_into_batches, batch_id,
@@ -401,13 +436,22 @@ for cat in plan["summary"]["categories_planned"]:
         continue
 
     # Window-by-window: parallel within a window, sequential across windows.
+    # Load this category's domain briefs ONCE — slice per batch below.
+    domain_briefs = load_json(logs_dir / f"domain_brief_{cat}.json") or {"briefs": []}
+    by_path = {b["expected_file"]: b for b in domain_briefs.get("briefs", [])
+               if isinstance(b, dict) and b.get("expected_file")}
+
     for window in chunked(todo, MAX_PARALLEL_BATCHES_PER_CATEGORY):
         prior = summarize_prior_batches(state, cat)   # paths only, no code
         in_flight = []
         for idx, batch_files in window:
+            # Slice domain_brief: only entries for files in this batch.
+            batch_brief = [by_path[ef["path"]] for ef in batch_files
+                           if ef["path"] in by_path]
             agent_input = build_input(
                 agent_name, cat, batch_files,
                 prior_batches_summary=prior,           # context-warm
+                domain_brief=batch_brief,              # behavior-driven generation
             )
             in_flight.append(
                 (idx, Task(agent_name, agent_input, run_in_background=True))
@@ -415,17 +459,29 @@ for cat in plan["summary"]["categories_planned"]:
         for idx, task_handle in in_flight:
             r = await_task(task_handle)
 
-            # --- A2: hard policy — no stub fallback ---
-            emitted  = {o["path"] for o in r.get("outputs", [])
-                        if validate_path(o["path"], language=analysis.language)[0]}
-            expected = {ef["path"] for ef in window_expected_by_idx[idx]}
-            extras   = sorted(emitted - expected)   # wrong-named (e.g. test_X.ts on TS)
-            missing  = sorted(expected - emitted)   # never generated
+            # --- contract diff via wrapper (HARD GATE). No inline math. ---
+            # Per-window expected_files slice was previously persisted to disk
+            # as ${LOGS_DIR}/expected_files.json (built in Phase 2.5). The wrapper
+            # uses it as the source of truth and applies the project's
+            # language-aware regex.
+            diff = bash_capture_json(
+                f"echo '{json.dumps(r)}' | python3 "
+                f"\"${{CLAUDE_PLUGIN_ROOT}}/skills/_shared/scripts/contract_diff.py\" "
+                f"--expected-files \"${{LOGS_DIR}}/expected_files.json\" "
+                f"--category {cat} --language {analysis.language}"
+            )
+            extras     = diff["extras"]      # wrong-named (e.g. test_X.ts on TS)
+            missing    = diff["missing"]     # never generated
+            violations = diff["violations"]  # path failed language regex
 
+            # --- hard policy — no stub fallback ---
             for p in extras:
                 # Delete the wrong-named file so it cannot count toward coverage.
                 Path(project_root / p).unlink(missing_ok=True)
                 warnings.append(f"path_contract_violation:{p}")
+
+            for v in violations:
+                warnings.append(v)            # path_regex_violation_<lang>:<path>
 
             if missing:
                 r["status"]        = "partial" if r.get("status") == "passed" else r["status"]
@@ -439,15 +495,23 @@ for cat in plan["summary"]["categories_planned"]:
             mark_completed(state, batch_id(cat, idx), output_paths)
             save_batch_state(logs_dir, state)         # persist after each batch
 
-            # B4 telemetry — atomic per-batch log to disk for postmortem.
+            # telemetry — atomic per-batch log to disk for postmortem.
             write_agent_output(logs_dir, agent_name, r, batch_idx=idx)
             agent_outputs[cat].append(r)
 
-    # B4: collapse per-batch logs into merged agent_output_<agent>.json.
+    # collapse per-batch logs into merged agent_output_<agent>.json.
     write_merged_agent_output(logs_dir, agent_name, agent_outputs[cat])
+
+# persist warnings so scripts/build_report.py picks them up in Phase 6.
+write_json(logs_dir / "warnings.json", sorted(set(warnings)))
 ```
 
-### Telemetry — per-agent output logs (B4)
+`warnings.json` is the bridge between dispatch-time observations and
+report-data assembly: `build_report.py` reads it as the orchestrator's
+warnings input. Sub-agent merged warnings are read separately from
+`agent_output_<agent>.json`.
+
+### Telemetry — per-agent output logs
 
 Every Task return value is persisted **before** Phase 4 aggregation. Layout:
 
@@ -478,7 +542,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/agent_log.py" merge \
 
 ### Hard policy — no stub fallback
 
-Track A2 forbids every orchestrator code path that previously synthesised a
+Orchestrator policy forbids every code path that previously synthesised a
 placeholder file under `tests/` to satisfy `expected_files`. The matrix:
 
 | Sub-agent emits | Orchestrator action |
@@ -506,6 +570,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/budget.py" mark-completed 
     --paths "${EMITTED_JSON_ARRAY}"
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/budget.py" prior-summary \
     --logs-dir "${LOGS_DIR}" --category "${CAT}"
+
+# diff one AgentResult against expected_files (post-dispatch HARD GATE):
+echo "$AGENT_RESULT" | python3 \
+    "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/contract_diff.py" \
+    --expected-files "${LOGS_DIR}/expected_files.json" \
+    --category "${CAT}" --language "${LANGUAGE}"
+# exit 0 = clean; exit 1 = {extras|missing|violations} present (orchestrator acts).
 ```
 
 | Category | Agent | Skip reasons (set in Phase 2.5) |
@@ -547,7 +618,7 @@ Every Task invocation to a test-gen agent MUST include a `path_contract` block i
   "project_root": "${RunContext.project_root}",
   "test_root": "${RunContext.project_root}/tests",
   "category_root": "${RunContext.project_root}/tests/<category>",
-  "required_pattern": "<language-aware: emit qa_skills.validators.language_pattern(analysis.language)>",
+  "required_pattern": "<language-aware regex emitted by qa_skills.validators.language_pattern(analysis.language)>",
   "language": "${analysis.language}",
   "policy": "exact",
   "expected_files": [

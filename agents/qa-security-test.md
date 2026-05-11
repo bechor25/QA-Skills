@@ -116,7 +116,22 @@ Behavior on priors:
 3. Only generate tests for categories where signals exist (no generic test spam).
 4. File layout comes from `path_contract.expected_files` only — see Phase 2.5 above.
 5. Max 2 fix iterations.
-6. **Self-validate before return.** Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" --json "$RESULT"`. See `reference/agent-result-contract.md`.
+6. **Self-validate before return (HARD GATE).** Run:
+   ```bash
+   echo "$RESULT" | python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" \
+     --language "${input.language:-${analysis.language}}"
+   ```
+   exit_code `0` → continue. exit_code `2` → repair, retry once; else return `{"status":"error","reason":"self_validation_failed:<err>"}`. The `--language` flag enables the project's language-aware regex. Never bypass.
+7. **Execution gate (HARD GATE).** Attach canonical `execution_result` via the runner wrapper:
+   ```bash
+   echo "$AGENT_RESULT_PARTIAL" | python3 \
+     "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/run_tests.py" \
+     --category security --project-root "${PROJECT_ROOT}" \
+     --language "${input.language:-${analysis.language}}" \
+     --files-json - \
+     --out "${LOGS_DIR}/execution_qa-security-test.json"
+   ```
+   Returning `status: passed` without `execution_result` → orchestrator rejects. Security failures MUST be surfaced verbatim — never weaken assertions to mask a real vuln. `failed > 0` → `status: partial` + `vulnerabilities_found[]` entries.
 
 # Boundary rules — what this agent owns vs. what other agents own
 
@@ -219,6 +234,17 @@ for entry in expected:
 | Auth endpoints | `timing_attacks` |
 | URL-accepting fields | `ssrf` |
 | Routes with `next`/`return_to`/`redirect` params | `open_redirect` |
+
+# Phase 2.7 — Domain brief (when present)
+
+When the orchestrator includes `domain_brief` in your input, it is the
+authoritative source of attack surfaces to test per `expected_files[i]`.
+Read `${CLAUDE_PLUGIN_ROOT}/reference/domain-brief.md` for the contract.
+For security, treat each `behavior.error_paths[]` entry as a candidate
+hardening test (e.g. "wrong password → 401" becomes a test that wrong
+password does NOT leak side-channel info). One `it` per `test_hints[]`
+entry. Record `hints_used[]`, `skipped_hints[]`. Absent brief → smoke-only
++ warning `domain_brief_missing`.
 
 # Phase 3 — Generate
 

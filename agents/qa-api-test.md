@@ -61,7 +61,22 @@ Generate working HTTP-level tests for routes detected by code-analyzer. Pre-flig
 2. Group tests by resource tag (one file per resource: `auth.api.test.*`, `users.api.test.*`).
 3. Max 2 fix iterations per file.
 4. Never weaken security-related assertions (status code 401/403 expectations stay).
-5. **Self-validate before return.** Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" --json "$RESULT"`. See `reference/agent-result-contract.md`.
+5. **Self-validate before return (HARD GATE).** Run:
+   ```bash
+   echo "$RESULT" | python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" \
+     --language "${input.language:-${analysis.language}}"
+   ```
+   exit_code `0` → continue. exit_code `2` → repair, retry once; else return `{"status":"error","reason":"self_validation_failed:<err>"}`. The `--language` flag enables the project's language-aware regex (TS: `<name>.api.test.ts`; Python: `test_<name>.py`). Never bypass.
+6. **Execution gate (HARD GATE).** After Phase 5 Run/Fix-loop, you MUST attach a canonical `execution_result` block to the AgentResult by invoking the runner wrapper:
+   ```bash
+   echo "$AGENT_RESULT_PARTIAL" | python3 \
+     "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/run_tests.py" \
+     --category api --project-root "${PROJECT_ROOT}" \
+     --language "${input.language:-${analysis.language}}" \
+     --files-json - \
+     --out "${LOGS_DIR}/execution_qa-api-test.json"
+   ```
+   Embed the wrapper's JSON under `execution_result` in your final AgentResult. Returning `status: passed` without `execution_result` (or with `execution_result.exit_code != 0`) → orchestrator rejects (`error: missing_execution_result` / forces `partial`). `exit_code == 127` → `status: skipped:runner_missing`. The wrapper handles vitest / jest / pytest detection automatically.
 
 # Boundary rules — what this agent owns vs. what other agents own
 
@@ -165,6 +180,21 @@ for entry in expected:
 - Do NOT consult `analysis.modules` to choose paths — only to fill content.
 
 Validate every emitted `path` against `path_contract.required_pattern` before Write. Mismatch → `path_regex_violation:<path>` and skip that file.
+
+# Phase 3.5 — Domain brief (when present)
+
+When the orchestrator includes `domain_brief` in your input, it is the
+authoritative source of behaviors to test for each `expected_files[i]`.
+Read `${CLAUDE_PLUGIN_ROOT}/reference/domain-brief.md` for the contract.
+Short version:
+
+- One `it`/`test` per entry in `brief.test_hints[]`.
+- Assert against `brief.behaviors[*].expected_outcome` (payload shape AND
+  side effects), not status codes only.
+- Emit `happy_path` first. Record any unimplementable hint in
+  `outputs[i].skipped_hints[]`.
+- Record `hints_used[]` per file.
+- `domain_brief` absent → smoke happy-path only + warning `domain_brief_missing`.
 
 # Phase 4 — Generate per endpoint
 

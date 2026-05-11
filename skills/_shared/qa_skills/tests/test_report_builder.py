@@ -95,6 +95,91 @@ def test_phantom_routes_filtered_in_coverage(fastapi, tmp_path):
     assert "POST /api/nonexistent" not in api_cov["covered_items"]
 
 
+def test_coverage_includes_execution_block_default_shape(fastapi, tmp_path):
+    """Every coverage entry MUST have an execution block (default = empty)."""
+    report = build_report_data(
+        run_id="run-x1", project_root=str(tmp_path),
+        analysis=fastapi, all_test_outputs=_make_outputs(),
+        env_categories_removed=[],
+    )
+    for cat, info in report["coverage_by_category"].items():
+        assert "execution" in info, f"{cat} missing execution block"
+        execu = info["execution"]
+        for k in ("runner", "total", "passed", "failed", "skipped",
+                  "duration_ms", "failures", "exit_code"):
+            assert k in execu, f"{cat}.execution missing {k}"
+
+
+def test_execution_results_dict_threaded_into_coverage(fastapi, tmp_path):
+    execution_results = {
+        "qa-api-test": {
+            "category": "api", "runner": "vitest",
+            "total": 5, "passed": 3, "failed": 2, "skipped": 0,
+            "duration_ms": 700,
+            "failures": [{"file": "tests/api/auth/test_login.py",
+                          "title": "login 401 path",
+                          "error": "AssertionError",
+                          "stack_excerpt": ""}],
+            "exit_code": 1,
+        },
+    }
+    report = build_report_data(
+        run_id="run-x2", project_root=str(tmp_path),
+        analysis=fastapi, all_test_outputs=_make_outputs(),
+        env_categories_removed=[],
+        execution_results=execution_results,
+    )
+    api = report["coverage_by_category"]["api"]
+    assert api["execution"]["failed"] == 2
+    assert api["execution"]["runner"] == "vitest"
+    # Status downgraded to partial because failures > 0
+    assert api["status"] == "partial"
+
+
+def test_runner_missing_marks_skipped(fastapi, tmp_path):
+    execution_results = {
+        "qa-unit-test": {
+            "runner": "unknown", "total": 0, "passed": 0, "failed": 0,
+            "skipped": 0, "duration_ms": 0, "failures": [], "exit_code": 127,
+        },
+    }
+    report = build_report_data(
+        run_id="run-x3", project_root=str(tmp_path),
+        analysis=fastapi, all_test_outputs=_make_outputs(),
+        env_categories_removed=[],
+        execution_results=execution_results,
+    )
+    unit = report["coverage_by_category"]["unit"]
+    assert unit["status"] == "skipped:runner_missing"
+
+
+def test_embedded_execution_result_takes_precedence(fastapi, tmp_path):
+    """When the agent embeds execution_result in its AgentResult, it wins."""
+    outputs = [
+        {"agent": "qa-api-test", "status": "passed", "outputs": [
+            {"path": "tests/api/auth/test_login.py", "covers": ["POST /api/login"], "tests_written": 7},
+        ],
+         "execution_result": {
+             "runner": "vitest", "total": 1, "passed": 1, "failed": 0,
+             "skipped": 0, "duration_ms": 50, "failures": [], "exit_code": 0,
+         }},
+    ]
+    # logs-dir style results would say "failed: 99" — embedded should win.
+    execution_results = {
+        "qa-api-test": {"runner": "vitest", "total": 1, "passed": 0, "failed": 99,
+                        "skipped": 0, "duration_ms": 0, "failures": [], "exit_code": 1},
+    }
+    report = build_report_data(
+        run_id="run-x4", project_root=str(tmp_path),
+        analysis=fastapi, all_test_outputs=outputs,
+        env_categories_removed=[],
+        execution_results=execution_results,
+    )
+    api = report["coverage_by_category"]["api"]
+    assert api["execution"]["failed"] == 0   # embedded wins
+    assert api["execution"]["passed"] == 1
+
+
 def test_gaps_identify_uncovered_payment_module(tmp_path):
     """Modify analysis to include a payments module and confirm it surfaces as high-severity gap."""
     import json

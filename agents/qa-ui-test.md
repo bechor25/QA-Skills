@@ -57,7 +57,22 @@ TS/JS: wrapped in `/** ... */`.
 6. **Multi-tab / RTL / route-mock tests OFF by default.** Only generate if reconnaissance confirms the relevant pattern (i18n attribute, multiple windows in app code, etc.) or caller explicitly enables them.
 7. **Max 2 fix iterations per batch.** Not 3. If a batch is still failing after 2 fixes → mark partial and stop generating subsequent batches.
 8. **Never run Playwright tests without a server.** If server stops responding mid-run → return partial.
-9. **Self-validate before return.** Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" --json "$RESULT"`. See `reference/agent-result-contract.md`.
+9. **Self-validate before return (HARD GATE).** Run:
+    ```bash
+    echo "$RESULT" | python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" \
+      --language "${input.language:-${analysis.language}}"
+    ```
+    exit_code `0` → continue. exit_code `2` → repair, retry once; else return `{"status":"error","reason":"self_validation_failed:<err>"}`. The `--language` flag enables the project's language-aware regex (TS: `<name>.spec.ts`). Never bypass.
+10. **Execution gate (HARD GATE).** Attach canonical `execution_result` via the runner wrapper. Wrapper auto-detects Playwright when the project ships `playwright.config.*` AND category is `ui`:
+    ```bash
+    echo "$AGENT_RESULT_PARTIAL" | python3 \
+      "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/run_tests.py" \
+      --category ui --project-root "${PROJECT_ROOT}" \
+      --language "${input.language:-${analysis.language}}" \
+      --files-json - \
+      --out "${LOGS_DIR}/execution_qa-ui-test.json"
+    ```
+    Returning `status: passed` without `execution_result` → orchestrator rejects. Server unreachable mid-run → `execution_result.exit_code != 0` and `status: partial`. Wrapper handles per-batch Playwright invocation; never invoke Playwright directly here.
 
 # Inputs (from caller)
 
@@ -372,6 +387,17 @@ for entry in expected:
 - ONE write per `expected_files[i].path`. No mega-files. No splits. No `derive_subdir()` — orchestrator already did that.
 - Smoke spec is the ONE allowed extra (bootstrap). Anything else under `tests/ui/` outside `expected_files` is rejected by Phase 9.
 - Validate emitted paths against `path_contract.required_pattern` before Write.
+
+# Phase 3.7 — Domain brief (when present)
+
+When `domain_brief` is in your input, it lists user-flow behaviors per
+`expected_files[i]`. Read `${CLAUDE_PLUGIN_ROOT}/reference/domain-brief.md`
+for the contract. For UI tests, behaviors are user-visible flows
+(`fill_form_submit_redirect`, `loading_then_data_appears`, `error_state_shows_toast`).
+One `test` per `test_hints[]` entry. Assert visible state (text content,
+URL, role/name accessible queries) — NOT just status codes. Record
+`hints_used[]`, `skipped_hints[]`. Absent brief → smoke-only happy path +
+warning `domain_brief_missing`.
 
 # Phase 4 — Smoke batch
 

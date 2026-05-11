@@ -59,7 +59,22 @@ Generate contract tests verifying API response shape matches declared OpenAPI sp
 1. Pre-flight required.
 2. Mode detection automatic: OpenAPI present → openapi mode. Golden masters present → golden_update. Else → golden_capture.
 3. Max 2 fix iterations.
-4. **Self-validate before return.** Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" --json "$RESULT"`. See `reference/agent-result-contract.md`.
+4. **Self-validate before return (HARD GATE).** Run:
+   ```bash
+   echo "$RESULT" | python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" \
+     --language "${input.language:-${analysis.language}}"
+   ```
+   exit_code `0` → continue. exit_code `2` → repair, retry once; else return `{"status":"error","reason":"self_validation_failed:<err>"}`. The `--language` flag enables the project's language-aware regex. Never bypass.
+5. **Execution gate (HARD GATE).** Attach canonical `execution_result` via the runner wrapper:
+   ```bash
+   echo "$AGENT_RESULT_PARTIAL" | python3 \
+     "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/run_tests.py" \
+     --category contract --project-root "${PROJECT_ROOT}" \
+     --language "${input.language:-${analysis.language}}" \
+     --files-json - \
+     --out "${LOGS_DIR}/execution_qa-contract-test.json"
+   ```
+   Returning `status: passed` without `execution_result` → orchestrator rejects. Contract drift (schema mismatch) MUST stay failing — never auto-update golden files in this pass.
 
 # Boundary rules — what this agent owns vs. what other agents own
 
@@ -135,6 +150,16 @@ for entry in expected:
 ```
 
 **Hard rules**: ONE write per `expected_files[i].path`. Do NOT call `derive_domain_and_tag()` or any path-derivation logic — that lives only in `qa_skills.path_planner`. Validate emitted paths against `path_contract.required_pattern` before Write.
+
+# Phase 2.7 — Domain brief (when present)
+
+When `domain_brief` is in your input, it is the authoritative source of
+expected response shapes for each `expected_files[i]`. Read
+`${CLAUDE_PLUGIN_ROOT}/reference/domain-brief.md` for the contract. For
+contract tests, treat each `behavior.expected_outcome` as the schema to
+validate against (OpenAPI or golden-master). One `it` per `test_hints[]`
+entry. Record `hints_used[]`, `skipped_hints[]`. Absent brief → smoke-only
++ warning `domain_brief_missing`.
 
 # Phase 3 — Generate
 

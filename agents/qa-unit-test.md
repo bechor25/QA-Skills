@@ -56,7 +56,12 @@ Generate working unit tests for changed/new modules. Run them. Fix failures up t
 3. Max 2 fix iterations per file. After that, mark partial.
 4. Never weaken assertions to make tests pass — if a test reveals a real bug, leave it failing and document.
 5. Stay under `budgets.max_tokens`. If approaching limit → finish current file and return partial.
-6. **Self-validate before return.** Before emitting the final result JSON, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" --json "$RESULT"`. Failures → repair deterministically, retry once, else return `{"status":"error","reason":"self_validation_failed: <err>"}`. See `reference/agent-result-contract.md`.
+6. **Self-validate before return (HARD GATE).** Before emitting the final result JSON, run:
+   ```bash
+   echo "$RESULT" | python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" \
+     --language "${input.language:-${analysis.language}}"
+   ```
+   exit_code `0` → continue. exit_code `2` → repair deterministically, retry **once**; if still failing, return `{"status":"error","reason":"self_validation_failed: <err>"}`. Never bypass. The `--language` flag enables the project's language-aware regex so a TS project rejects `test_X.ts` (Python-style names) and vice versa. See `reference/agent-result-contract.md`.
 
 # Boundary rules — what this agent owns vs. what other agents own
 
@@ -143,6 +148,22 @@ for entry in expected:
 - Do NOT consolidate modules into mega-files; ALSO do not split modules across files.
 - Validate emitted paths against `path_contract.required_pattern` before Write. Mismatch → `path_regex_violation:<path>` and skip that file.
 
+# Phase 2.7 — Domain brief (when present)
+
+When the orchestrator includes `domain_brief` in your input (one entry per
+`expected_files[i]`), it is the authoritative source of behaviors to test.
+Read `${CLAUDE_PLUGIN_ROOT}/reference/domain-brief.md` for the contract.
+Short version:
+
+- Generate **one `it`/`test` per entry in `brief.test_hints[]`**.
+- Assert against `brief.behaviors[*].expected_outcome` — payload shape AND
+  side effects, not just truthiness.
+- Emit `happy_path` first. Record any unimplementable hint in
+  `outputs[i].skipped_hints[]` — never fabricate a passing test.
+- Record `hints_used[]` per file so the orchestrator can validate breadth.
+- If `domain_brief` is absent or empty for an entry → smoke-only test +
+  warning `domain_brief_missing`.
+
 # Phase 3 — Generate
 
 For every exported function/class, generate this minimum coverage:
@@ -165,26 +186,59 @@ Mandatory inclusions (humans miss these):
 
 For full code templates per language, Read `${CLAUDE_PLUGIN_ROOT}/reference/unit-test-patterns.md` (fallback: `reference/unit-test-patterns.md` relative to plugin root) — load only the section matching the detected language.
 
-# Phase 4 — Run
+# Phase 4 — Run (HARD GATE)
 
-| Language | Command |
-|----------|---------|
-| TS/JS (Jest) | `cd ${project_root} && npx jest <test_path> --json --outputFile=.qa-skills/jest-results.json 2>&1` |
-| TS/JS (Vitest) | `cd ${project_root} && npx vitest run <test_path> --reporter=json 2>&1` |
-| Python | `cd ${project_root} && pytest <test_path> --tb=short -q --json-report --json-report-file=.qa-skills/pytest-results.json 2>&1` |
+> Sub-agent MUST execute the tests it just emitted. Returning
+> `status: passed` without an attached `execution_result` block →
+> orchestrator rejects the AgentResult with `error: missing_execution_result`.
 
-Parse results from JSON file (Jest, pytest).
+After writing every test file, run the canonical wrapper. It detects the
+project's runner (vitest / jest / pytest / playwright) and returns a stable
+shape regardless of language:
+
+```bash
+echo "$AGENT_RESULT_PARTIAL_OUTPUTS_JSON" | python3 \
+    "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/run_tests.py" \
+    --category unit --project-root "${PROJECT_ROOT}" \
+    --language "${input.language:-${analysis.language}}" \
+    --files-json - \
+    --out "${LOGS_DIR}/execution_qa-unit-test.json"
+# stdout = canonical JSON. exit 0 = all green; exit 1 = failures present.
+```
+
+Canonical result shape (becomes `execution_result` in your AgentResult):
+
+```json
+{
+  "category":   "unit",
+  "runner":     "vitest" | "jest" | "pytest" | "playwright",
+  "total": 12, "passed": 10, "failed": 2, "skipped": 0,
+  "duration_ms": 4530,
+  "failures": [
+    {"file": "tests/unit/svc/test_svc.py",
+     "title": "test_compute_total_with_discount",
+     "error": "AssertionError: expected 80, got 85",
+     "stack_excerpt": "<≤10 lines>"}
+  ],
+  "exit_code": 1
+}
+```
 
 # Phase 5 — Fix loop
 
-For each failing test:
+For each entry in `execution_result.failures`:
 1. Read failing test file.
 2. Read source module.
 3. Identify root cause: wrong mock shape, wrong expected value, missing import, wrong function name, signature mismatch.
 4. Fix only that test. Do not rewrite passing tests.
-5. Re-run.
+5. Re-run with the wrapper above.
 
-Max 2 iterations per file. Then mark file as `partial`.
+**Max 2 iterations.** After that, accept remaining failures:
+- `status: partial` if `execution_result.failed > 0`.
+- `status: passed` only if `execution_result.exit_code == 0`.
+- `status: skipped:runner_missing` if `execution_result.exit_code == 127`.
+
+Never weaken assertions to make tests pass. A failing test that reveals a real bug is the agent's value — keep it failing and surface it.
 
 # Failure modes
 

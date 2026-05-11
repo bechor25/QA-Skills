@@ -161,3 +161,79 @@ def test_stub_files_deduplicated_across_sources():
     ]
     html = render_html(rd)
     assert html.count("tests/api/auth/test_login.py") == 1
+
+
+# ---------- C3.c: execution badges + failures section ----------
+
+
+def test_exec_badge_green_when_all_passed():
+    rd = _minimal_report()
+    rd["coverage_by_category"]["unit"]["execution"] = {
+        "runner": "vitest",
+        "total": 12, "passed": 12, "failed": 0, "skipped": 0,
+        "duration_ms": 1234, "failures": [], "exit_code": 0,
+    }
+    html = render_html(rd)
+    assert "exec-badge green" in html
+    assert "12/12" in html
+
+
+def test_exec_badge_red_when_failures_present():
+    rd = _minimal_report()
+    rd["coverage_by_category"]["api"]["execution"] = {
+        "runner": "vitest",
+        "total": 10, "passed": 7, "failed": 3, "skipped": 0,
+        "duration_ms": 1500,
+        "failures": [
+            {"file": "tests/api/auth/login.api.test.ts",
+             "title": "rejects malformed JWT",
+             "error": "Expected 401, got 200",
+             "stack_excerpt": "at line 42"},
+        ],
+        "exit_code": 1,
+    }
+    html = render_html(rd)
+    assert "exec-badge red" in html
+    assert "tests/api/auth/login.api.test.ts" in html
+    assert "rejects malformed JWT" in html
+    assert "Expected 401, got 200" in html
+
+
+def test_exec_badge_gray_when_runner_missing():
+    rd = _minimal_report()
+    rd["coverage_by_category"]["unit"]["execution"] = {
+        "runner": "unknown",
+        "total": 0, "passed": 0, "failed": 0, "skipped": 0,
+        "duration_ms": 0, "failures": [], "exit_code": 127,
+    }
+    html = render_html(rd)
+    assert "exec-badge gray" in html
+    assert "runner not installed" in html
+
+
+def test_exec_badge_gray_when_no_run_attempted():
+    rd = _minimal_report()
+    rd["coverage_by_category"]["unit"]["execution"] = {
+        "runner": None, "total": 0, "passed": 0, "failed": 0,
+        "skipped": 0, "duration_ms": 0, "failures": [], "exit_code": None,
+    }
+    html = render_html(rd)
+    assert "not executed" in html
+
+
+def test_failures_section_truncated_at_50():
+    rd = _minimal_report()
+    rd["coverage_by_category"]["api"]["execution"] = {
+        "runner": "vitest", "total": 100, "passed": 40, "failed": 60,
+        "skipped": 0, "duration_ms": 0,
+        "failures": [
+            {"file": f"tests/api/x{i}.api.test.ts", "title": f"t{i}",
+             "error": f"err{i}", "stack_excerpt": ""}
+            for i in range(60)
+        ],
+        "exit_code": 1,
+    }
+    html = render_html(rd)
+    # 50 rendered, 10 hidden
+    assert "tests/api/x49.api.test.ts" in html
+    assert "tests/api/x50.api.test.ts" not in html

@@ -53,39 +53,82 @@ def _normalize_status(s: str | None) -> str:
     return "error"
 
 
+def _empty_execution() -> dict[str, Any]:
+    """Shape-stable execution block when no execution_result is available."""
+    return {
+        "runner": None,
+        "total": 0, "passed": 0, "failed": 0, "skipped": 0,
+        "duration_ms": 0, "failures": [], "exit_code": None,
+    }
+
+
+def _empty_coverage(status: str, **extra: Any) -> dict[str, Any]:
+    """Shape-stable v2 coverage entry for skipped/error/not_generated categories."""
+    base: dict[str, Any] = {
+        "pct": 0,
+        "covered_items": [],
+        "missing_items": [],
+        "total": 0,
+        "files": [],
+        "stub_files": [],
+        "status": status,
+        "execution": _empty_execution(),
+    }
+    base.update(extra)
+    return base
+
+
+def _execution_for_agent(
+    execution_results: dict[str, dict] | None, agent: str
+) -> dict[str, Any]:
+    """Return execution block keyed by agent name; empty when absent."""
+    if not execution_results:
+        return _empty_execution()
+    info = execution_results.get(agent)
+    if not isinstance(info, dict):
+        return _empty_execution()
+    return {
+        "runner":      info.get("runner"),
+        "total":       int(info.get("total") or 0),
+        "passed":      int(info.get("passed") or 0),
+        "failed":      int(info.get("failed") or 0),
+        "skipped":     int(info.get("skipped") or 0),
+        "duration_ms": int(info.get("duration_ms") or 0),
+        "failures":    list(info.get("failures") or []),
+        "exit_code":   info.get("exit_code"),
+        "note":        info.get("note"),
+    }
+
+
 def build_coverage_by_category(
     analysis: Analysis,
     all_test_outputs: list[dict],
     env_categories_removed: list[dict],
     project_root: str | Path,
+    execution_results: dict[str, dict] | None = None,
 ) -> dict[str, dict[str, Any]]:
     coverage: dict[str, dict[str, Any]] = {}
     for cat, agent in CATEGORY_TO_AGENT.items():
         # 1. env-validator removed?
         removed = next((r for r in env_categories_removed if r.get("name") == cat), None)
         if removed:
-            coverage[cat] = {
-                "pct": 0, "covered_items": [], "missing_items": [],
-                "total": 0, "files": [], "status": "skipped:env_removed",
-                "reason": removed.get("reason"), "action": removed.get("action"),
-            }
+            coverage[cat] = _empty_coverage(
+                "skipped:env_removed",
+                reason=removed.get("reason"),
+                action=removed.get("action"),
+            )
             continue
 
         agent_out = _agent_output(all_test_outputs, agent)
         if agent_out is None:
-            coverage[cat] = {
-                "pct": 0, "covered_items": [], "missing_items": [],
-                "total": 0, "files": [], "status": "skipped:not_generated",
-            }
+            coverage[cat] = _empty_coverage("skipped:not_generated")
             continue
 
         normalized = _normalize_status(agent_out.get("status"))
         if normalized.startswith("skipped:") or normalized == "error":
-            coverage[cat] = {
-                "pct": 0, "covered_items": [], "missing_items": [],
-                "total": 0, "files": [], "status": normalized,
-                "reason": agent_out.get("reason"),
-            }
+            coverage[cat] = _empty_coverage(
+                normalized, reason=agent_out.get("reason")
+            )
             continue
 
         cov = compute_coverage(
@@ -99,6 +142,22 @@ def build_coverage_by_category(
             cov["missing_items"] = sorted(
                 set(cov.get("missing_items", []) or []) | set(agent_missing)
             )
+
+        # C3.c: attach execution block. Prefer the agent's embedded
+        # execution_result; fall back to the per-agent execution_*.json file
+        # captured from logs_dir by the wrapper.
+        embedded = agent_out.get("execution_result")
+        if isinstance(embedded, dict):
+            cov["execution"] = _execution_for_agent({agent: embedded}, agent)
+        else:
+            cov["execution"] = _execution_for_agent(execution_results, agent)
+
+        # Downgrade status when execution shows failures the agent did not flag.
+        if cov["execution"]["failed"] > 0 and cov["status"] == "passed":
+            cov["status"] = "partial"
+        if cov["execution"]["exit_code"] == 127 and cov["status"] == "passed":
+            cov["status"] = "skipped:runner_missing"
+
         coverage[cat] = cov
 
         # ui/a11y get artifacts inline too
@@ -146,8 +205,14 @@ def build_report_data(
     locale: str = "en",
     warnings: list[str] | None = None,
     learnings_summary: dict | None = None,
+    execution_results: dict[str, dict] | None = None,
 ) -> dict:
     """Assemble the full report-data dict.
+
+    `execution_results` is an agent-name -> canonical-runner-result map (the
+    shape emitted by `qa_skills.runner.run_tests`). When supplied, every
+    `coverage_by_category[cat].execution` block is populated from it; agents
+    that embedded `execution_result` in their AgentResult take precedence.
 
     Returns the dict; does NOT write to disk. Caller (qa-coverage-reporter agent)
     writes it after final tweaks.
@@ -158,6 +223,7 @@ def build_report_data(
 
     coverage = build_coverage_by_category(
         analysis, all_test_outputs, env_categories_removed, project_root,
+        execution_results=execution_results,
     )
 
     gaps = identify_gaps(

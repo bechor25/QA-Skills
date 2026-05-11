@@ -46,43 +46,54 @@ Two responsibilities:
 }
 ```
 
-# Phase 1 — Build report-data.json (one wrapper call)
+# Phase 1 — Build report-data.json (ONE wrapper call — Bash only)
 
-`qa_skills.report_builder.build_report_data` orchestrates **all** of: `compute_coverage` (real-units math), `collect_artifacts` (UI/a11y media), `identify_gaps` (severity rules), `compute_quality_score`, status normalization (`skipped_no_server` → `skipped:no_server`), and final `report-data.json` shape (`version: "2.0"`, all required top-level fields).
+> ⚠️ HARD GATE: you MAY NOT assemble `report-data.json` JSON keys yourself. The
+> only acceptable Phase-1 action is **one** Bash call to `build_report.py`. If
+> the call exits non-zero or the schema gate fails, you return
+> `{"status":"error","reason":"report_build_failed"}` — never improvise a
+> hand-rolled fallback.
+
+`scripts/build_report.py` reads every `agent_output_*.json` (merged form) from
+`${LOGS_DIR}` — these are written by `qa_skills.agent_log.write_merged_agent_output`
+during orchestrator Phase 3. It runs `build_report_data(...)` and writes a
+shape-validated v2 report.
 
 ```bash
-# 1. Write inputs JSON to disk (orchestrator already passed these to you)
-cat > "${TMPDIR:-/tmp}/cov-inputs-${RUN_ID}.json" <<EOF
-{
-  "analysis_path":          "${ANALYSIS_PATH}",
-  "run_id":                 "${RUN_ID}",
-  "project_root":           "${PROJECT_ROOT}",
-  "all_test_outputs":       <ALL_TEST_OUTPUTS_JSON>,
-  "env_categories_removed": <ENV_REMOVED_JSON>,
-  "env_installs_performed": <ENV_INSTALLS_JSON>,
-  "flaky_tests":            <FLAKY_JSON>,
-  "timeline":               <TIMELINE_JSON>,
-  "locale":                 "${LOCALE}",
-  "run_type":               "${RUN_TYPE}",
-  "warnings":               <WARNINGS_JSON>,
-  "learnings_summary":      <LEARNINGS_SUMMARY_JSON_FROM_PHASE_5.5>
-}
-EOF
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/build_report.py" \
+  --run-id       "${RUN_ID}" \
+  --project-root "${PROJECT_ROOT}" \
+  --analysis     "${LOGS_DIR}/analysis.json" \
+  --logs-dir     "${LOGS_DIR}" \
+  --strategy     "${LOGS_DIR}/strategy.json" \
+  --flaky        "${LOGS_DIR}/flaky.json" \
+  --state        "${PROJECT_ROOT}/test-state.json" \
+  --locale       "${LOCALE}" \
+  --run-type     "${RUN_TYPE}" \
+  --out          "${PROJECT_ROOT}/test-reports/report-data.json"
 
-# 2. Build report-data.json
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/report_builder.py" \
-  --inputs "${TMPDIR:-/tmp}/cov-inputs-${RUN_ID}.json" \
-  --out    "${PROJECT_ROOT}/test-reports/report-data.json"
-# stdout: {"status": "completed", "report_data_path": "...", "quality_score": N}
+# stdout: {"status":"completed","report_data_path":"...","version":"2.0",
+#          "quality_score":N,"agent_outputs_consumed":K,"warnings_count":W}
 ```
 
-Order matters: run Phase 5.5 (learnings) BEFORE Phase 1, because `learnings_summary` is one of the inputs to `build_report_data`. If you have no prior learnings input, pass `null` and run Phase 5.5 right after (then re-emit `learnings_summary` in your return JSON).
+Exit code:
+- `0` — success. `version: "2.0"` and every `coverage_by_category[cat]` has
+  `{pct, covered_items[], missing_items[], total, files[], stub_files[], status}`.
+- `2` — `logs_dir` missing.
+- `3` — produced `version != "2.0"` (should not happen; bug).
+- `4` — produced a `coverage_by_category` entry missing one of the required v2 keys.
 
-**Hard rules enforced by the Python modules — do NOT re-implement:**
+Order — run Phase 5.5 (learnings) BEFORE Phase 1 so `learnings_summary` is
+written under `${LOGS_DIR}/learnings_summary.json`; build_report.py will pick
+it up. (If a prior summary is absent, Phase 5.5 still runs after Phase 1 to
+update `learnings.json`, but its summary will not appear in *this* report.)
+
+**Hard rules enforced by the wrapper — do NOT re-implement:**
 - `coverage[cat].covered_items` is the intersection of agent-reported `covers[]` ∩ analysis universe — phantom items are filtered.
 - `coverage[cat].missing_items` shows the user exactly what is uncovered.
+- `coverage[cat].stub_files` is populated from stub-aware `compute_coverage`.
 - Status enum closed: `passed | partial | error | skipped:<reason_code>`. Legacy `skipped_no_server` → translated.
-- `version: "2.0"` literal — schema enforces `const: "2.0"`.
+- `version: "2.0"` literal — schema-gated by the wrapper.
 - `ui_artifacts.playwright_report` / `a11y_artifacts.axe_report` only set if real `.html` file exists; otherwise `null`.
 
 Acceptance pytest: `skills/_shared/qa_skills/tests/test_report_builder.py`.

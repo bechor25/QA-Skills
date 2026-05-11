@@ -68,7 +68,22 @@ With `--screenshot=on`, pytest-playwright auto-captures one PNG per test. If 0 P
 3. File layout comes from `path_contract.expected_files` only — see Phase 3 above.
 4. Max 2 fix iterations.
 5. Critical/serious violations are **failures** to surface, not failures to suppress.
-6. **Self-validate before return.** Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" --json "$RESULT"`. See `reference/agent-result-contract.md`.
+6. **Self-validate before return (HARD GATE).** Run:
+   ```bash
+   echo "$RESULT" | python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" \
+     --language "${input.language:-${analysis.language}}"
+   ```
+   exit_code `0` → continue. exit_code `2` → repair, retry once; else return `{"status":"error","reason":"self_validation_failed:<err>"}`. The `--language` flag enables the project's language-aware regex (TS: `<name>.a11y.spec.ts`). Never bypass.
+7. **Execution gate (HARD GATE).** Attach canonical `execution_result` via the runner wrapper. Wrapper detects Playwright for the `a11y` category:
+   ```bash
+   echo "$AGENT_RESULT_PARTIAL" | python3 \
+     "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/run_tests.py" \
+     --category a11y --project-root "${PROJECT_ROOT}" \
+     --language "${input.language:-${analysis.language}}" \
+     --files-json - \
+     --out "${LOGS_DIR}/execution_qa-a11y-test.json"
+   ```
+   Returning `status: passed` without `execution_result` → orchestrator rejects. WCAG critical/serious violations MUST surface as failures, not silenced.
 
 # Boundary rules — what this agent owns vs. what other agents own
 
@@ -209,6 +224,16 @@ for entry in expected:
 - ONE write per `expected_files[i].path`. No mega-files. No splits.
 - Do NOT call any path-derivation logic — that lives only in `qa_skills.path_planner`.
 - Validate emitted paths against `path_contract.required_pattern` before Write.
+
+# Phase 3.5 — Domain brief (when present)
+
+When `domain_brief` is in your input, it lists WCAG behaviors per
+`expected_files[i]`. Read `${CLAUDE_PLUGIN_ROOT}/reference/domain-brief.md`
+for the contract. For a11y tests, hints will typically be
+`a11y_keyboard_navigation`, `a11y_focus_visible`, `a11y_aria_label`,
+`a11y_no_critical_axe`. One `test` per `test_hints[]` entry. Record
+`hints_used[]`, `skipped_hints[]`. Absent brief → smoke axe scan + warning
+`domain_brief_missing`.
 
 # Phase 4 — Generate per page group
 
