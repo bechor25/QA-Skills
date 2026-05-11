@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import argparse
 
+import json
+
 from ...agent.execution_controller import execute_all
 from ...flaky.detector import detect_flaky
 from ...healing.engine import heal_failures
 from ...quality.generation_loop import run_generation_loop
 from ...quality.scenario_generator import build_baseline_scenarios
+from ...report.builder import build_report_data
+from ...report.renderer import render_html
 from ...runtime.install_manager import run_installs
 from ...runtime.install_planner import plan_installs
 from ...runtime.workspace import new_workspace
@@ -76,8 +80,12 @@ def run(args: argparse.Namespace) -> int:
     sm.save(flaky)
     log.info("full-run: flaky=%d", len(flaky.entries))
 
-    log.info("full-run: reporting phase not yet implemented (see ROADMAP.md)")
-    return 0 if failed == 0 else 0  # don't fail CLI; report carries the verdict
+    data = build_report_data(project)
+    data_path = ws.root / "report-data.json"
+    data_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    html_path = render_html(data, project, ws.run_id)
+    log.info("full-run: report=%s (score=%d)", html_path, data["executive_summary"]["quality_score"])
+    return 0  # report carries the verdict
 
 
 def _collect_failure_logs(results) -> list[tuple[str, str]]:

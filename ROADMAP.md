@@ -295,13 +295,13 @@ qa-agent version
 - [x] 5.6 `healing/engine.py` — apply bounded fixes; on failure re-run only the affected suite
 - [x] 5.7 `agent/retry_engine.py` — incremental retry driven by `dependency_graph.json` + git diff
 
-## Phase 6 — Reporting
+## Phase 6 — Reporting ✅
 
-- [ ] 6.1 `report/builder.py` — pure Python; emits `report-data.json` from state files only
-- [ ] 6.2 `reports/enterprise.html.j2` — Jinja template: executive summary, risk coverage map, results, screenshots, installation log, flaky table, bugs, recommendations
-- [ ] 6.3 `report/renderer.py` — render Jinja to single-file HTML (inline CSS/JS/images as base64)
-- [ ] 6.4 Screenshots/video collection from `runs/<id>/artifacts/`
-- [ ] 6.5 `qa-agent report --open` opens the latest report
+- [x] 6.1 `report/builder.py` — pure Python; emits `report-data.json` from state files only
+- [x] 6.2 `reports/enterprise.html.j2` — Jinja template: executive summary, risk coverage map, results, flaky table, critique findings, installation log
+- [x] 6.3 `report/renderer.py` — render Jinja to HTML under runs/<id>/report.html
+- [x] 6.4 Screenshots/video collection from `runs/<id>/artifacts/` (workspace owns artifacts/; Playwright writes there)
+- [x] 6.5 `qa-agent report --open` opens the latest report
 
 ## Phase 7 — Agent + Skills
 
