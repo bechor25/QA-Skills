@@ -226,7 +226,7 @@ qa-agent version
 - [x] 0.9 Create `configs/defaults.yaml` + loader in `shared/`
 - [x] 0.10 Create root `README.md`, `AGENT.md`, `USAGE.md`, `CHANGELOG.md`
 
-## Phase 1 — Scanning & Context
+## Phase 1 — Scanning & Context ✅
 
 - [x] 1.1 `scanners/filesystem.py` — walk project, classify files by language, detect ignored paths
 - [x] 1.2 `scanners/tech_stack.py` — detect frameworks (Express, FastAPI, Spring, Next.js, Django, NestJS, Flask, etc.) from manifests + signature files
@@ -240,8 +240,8 @@ qa-agent version
 - [x] 1.10 `context/summarizer.py` — produce per-module + per-feature text summaries (no LLM)
 - [x] 1.11 `context/chunking.py` — split summaries into prompt-safe slices
 - [x] 1.12 `context/relevance.py` — given a feature/flow, return relevant module IDs ranked
-- [ ] 1.13 Wire `qa-agent analyze` to run Phase 1 end-to-end and write all state files
-- [ ] 1.14 Unit tests for scanners + KG builder against fixture repos (TS+Python)
+- [x] 1.13 Wire `qa-agent analyze` to run Phase 1 end-to-end and write all state files
+- [x] 1.14 Unit tests for scanners + KG builder against fixture repos (TS+Python)
 
 ## Phase 2 — Intelligence (Risk + Strategy)
 

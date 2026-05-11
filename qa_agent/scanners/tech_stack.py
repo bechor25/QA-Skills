@@ -199,22 +199,7 @@ def _read_py_deps(root: Path) -> set[str]:
     names: set[str] = set()
     pyproject = root / "pyproject.toml"
     if pyproject.exists():
-        try:
-            text = pyproject.read_text(encoding="utf-8")
-        except OSError:
-            text = ""
-        # Cheap parse — we only care which package names appear.
-        for line in text.splitlines():
-            ls = line.strip().strip(",").strip('"').strip("'")
-            if not ls or ls.startswith("#"):
-                continue
-            # take only the package portion before any version spec.
-            for sep in ("==", ">=", "<=", "~=", "!=", ">", "<", ";"):
-                if sep in ls:
-                    ls = ls.split(sep, 1)[0]
-            ls = ls.strip().lower()
-            if ls and ls[0].isalpha():
-                names.add(ls.split("[")[0])
+        names.update(_read_pyproject_deps(pyproject))
 
     for req_name in ("requirements.txt", "requirements-dev.txt", "dev-requirements.txt"):
         req = root / req_name
@@ -232,6 +217,47 @@ def _read_py_deps(root: Path) -> set[str]:
         except OSError:
             pass
     return names
+
+
+def _normalize_pkg(spec: str) -> str:
+    s = spec.strip().strip("'").strip('"')
+    for sep in ("==", ">=", "<=", "~=", "!=", ">", "<", ";", " "):
+        if sep in s:
+            s = s.split(sep, 1)[0]
+    return s.strip().lower().split("[")[0]
+
+
+def _read_pyproject_deps(path: Path) -> set[str]:
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:  # pragma: no cover — py>=3.11 has tomllib
+        return set()
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return set()
+
+    out: set[str] = set()
+    proj = data.get("project") or {}
+    for spec in proj.get("dependencies") or []:
+        if isinstance(spec, str):
+            out.add(_normalize_pkg(spec))
+    optional = proj.get("optional-dependencies") or {}
+    for group in optional.values():
+        for spec in group or []:
+            if isinstance(spec, str):
+                out.add(_normalize_pkg(spec))
+
+    # poetry
+    poetry = (data.get("tool") or {}).get("poetry") or {}
+    for key in ("dependencies", "dev-dependencies", "group"):
+        section = poetry.get(key)
+        if isinstance(section, dict):
+            for name in section.keys():
+                if name.lower() != "python":
+                    out.add(name.lower())
+    return {n for n in out if n}
 
 
 def _read_java_deps(root: Path) -> list[str]:
