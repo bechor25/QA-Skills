@@ -254,19 +254,19 @@ qa-agent version
 - [x] 2.7 Write `state/strategy.json`
 - [x] 2.8 `quality/coverage_intelligence.py` — feature/risk coverage (not line coverage)
 
-## Phase 3 — Test Generation
+## Phase 3 — Test Generation ✅
 
-- [ ] 3.1 `quality/scenario_generator.py` — LLM-backed; emits `scenarios.json` per capability
-- [ ] 3.2 `quality/test_critic.py` — LLM critic with rubric (assertions, duplicates, selectors, depth)
-- [ ] 3.3 `generators/api_tests.py` — emit pytest/jest API test files from scenarios
-- [ ] 3.4 `generators/ui_tests.py` — emit Playwright test files (TS)
-- [ ] 3.5 `generators/security_tests.py` — OWASP-aligned (auth, IDOR, injection, CSRF, XSS)
-- [ ] 3.6 `generators/accessibility_tests.py` — axe-core via Playwright
-- [ ] 3.7 `generators/performance_tests.py` — smoke perf (lighthouse + simple load)
-- [ ] 3.8 `generators/regression_tests.py` — flow re-execution based on history
-- [ ] 3.9 `quality/assertion_validator.py` — static check: no `expect(true).toBe(true)` / `assert True` / shallow asserts
-- [ ] 3.10 `quality/selector_validator.py` — for UI: prefer `data-testid`, reject brittle XPath
-- [ ] 3.11 Generation loop: scenario → generate → critique → improve → validate → write
+- [x] 3.1 `quality/scenario_generator.py` — LLM-backed; emits `scenarios.json` per capability
+- [x] 3.2 `quality/test_critic.py` — LLM critic with rubric (assertions, duplicates, selectors, depth)
+- [x] 3.3 `generators/api_tests.py` — emit pytest/jest API test files from scenarios
+- [x] 3.4 `generators/ui_tests.py` — emit Playwright test files (TS)
+- [x] 3.5 `generators/security_tests.py` — OWASP-aligned (auth, IDOR, injection, CSRF, XSS)
+- [x] 3.6 `generators/accessibility_tests.py` — axe-core via Playwright
+- [x] 3.7 `generators/performance_tests.py` — smoke perf (lighthouse + simple load)
+- [x] 3.8 `generators/regression_tests.py` — flow re-execution based on history
+- [x] 3.9 `quality/assertion_validator.py` — static check: no `expect(true).toBe(true)` / `assert True` / shallow asserts
+- [x] 3.10 `quality/selector_validator.py` — for UI: prefer `data-testid`, reject brittle XPath
+- [x] 3.11 Generation loop: scenario → generate → critique → improve → validate → write
 
 ## Phase 4 — Execution
 

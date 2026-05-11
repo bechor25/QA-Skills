@@ -133,6 +133,78 @@ class Strategy(BaseModel):
 
 
 # ----------------------------------------------------------------------
+# scenarios.json
+# ----------------------------------------------------------------------
+
+class ScenarioStep(BaseModel):
+    """A single Given/When/Then step in a scenario."""
+
+    keyword: Literal["given", "when", "then", "and"]
+    text: str
+
+
+class Scenario(BaseModel):
+    id: str
+    feature_id: str
+    capability: str
+    category: str  # api | ui | security | accessibility | performance | regression
+    title: str
+    description: str = ""
+    steps: list[ScenarioStep] = Field(default_factory=list)
+    severity: Literal["smoke", "critical", "edge", "negative"] = "smoke"
+
+
+class Scenarios(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    entries: list[Scenario] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# generated_tests.json
+# ----------------------------------------------------------------------
+
+class GeneratedTest(BaseModel):
+    scenario_id: str
+    feature_id: str
+    category: str
+    path: str  # repo-relative path of the generated test file
+    framework: str  # pytest | jest | playwright | ...
+    language: str
+    summary: str = ""
+
+
+class GeneratedTests(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    entries: list[GeneratedTest] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# critique.json
+# ----------------------------------------------------------------------
+
+class CritiqueFinding(BaseModel):
+    rule: str
+    severity: Literal["error", "warning", "info"]
+    message: str
+    line: int | None = None
+
+
+class CritiqueResult(BaseModel):
+    test_path: str
+    scenario_id: str
+    score: float = Field(ge=0.0, le=10.0)
+    findings: list[CritiqueFinding] = Field(default_factory=list)
+
+
+class Critique(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    results: list[CritiqueResult] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
 # execution_history.json
 # ----------------------------------------------------------------------
 

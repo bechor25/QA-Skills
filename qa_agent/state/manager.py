@@ -26,6 +26,9 @@ _FILES = {
     schemas.KnowledgeGraph: "knowledge_graph.json",
     schemas.RiskMatrix: "risk_matrix.json",
     schemas.Strategy: "strategy.json",
+    schemas.Scenarios: "scenarios.json",
+    schemas.GeneratedTests: "generated_tests.json",
+    schemas.Critique: "critique.json",
     schemas.ExecutionHistory: "execution_history.json",
     schemas.InstallationHistory: "installation_history.json",
     schemas.FlakyState: "flaky_state.json",
@@ -121,4 +124,10 @@ class StateManager:
             return model()  # type: ignore[return-value]
         if model is schemas.FlakyState:
             return model()  # type: ignore[return-value]
+        if model is schemas.Scenarios:
+            return model(built_at=now)  # type: ignore[return-value]
+        if model is schemas.GeneratedTests:
+            return model(built_at=now)  # type: ignore[return-value]
+        if model is schemas.Critique:
+            return model(built_at=now)  # type: ignore[return-value]
         raise StateError(f"no default for model {model.__name__}")
