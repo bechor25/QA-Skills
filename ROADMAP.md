@@ -285,15 +285,15 @@ qa-agent version
 - [x] 4.13 `agent/execution_controller.py` — orchestrates executor selection, batches, retries
 - [x] 4.14 Append `execution_history.json` for every run
 
-## Phase 5 — Quality (Flaky + Self-Healing)
+## Phase 5 — Quality (Flaky + Self-Healing) ✅
 
-- [ ] 5.1 `flaky/detector.py` — re-run failed/borderline tests N times, classify stability
-- [ ] 5.2 `flaky/classifier.py` — timing / network / env / race / order-dependent
-- [ ] 5.3 Write `flaky_state.json`
-- [ ] 5.4 `healing/classifiers.py` — classify failure (selector / timeout / dep / auth / flaky / assertion)
-- [ ] 5.5 `healing/policies.py` — what may be auto-fixed (max retries, allowed mutations)
-- [ ] 5.6 `healing/engine.py` — apply bounded fixes; on failure re-run only the affected suite
-- [ ] 5.7 `agent/retry_engine.py` — incremental retry driven by `dependency_graph.json` + git diff
+- [x] 5.1 `flaky/detector.py` — re-run failed/borderline tests N times, classify stability
+- [x] 5.2 `flaky/classifier.py` — timing / network / env / race / order-dependent
+- [x] 5.3 Write `flaky_state.json`
+- [x] 5.4 `healing/classifiers.py` — classify failure (selector / timeout / dep / auth / flaky / assertion)
+- [x] 5.5 `healing/policies.py` — what may be auto-fixed (max retries, allowed mutations)
+- [x] 5.6 `healing/engine.py` — apply bounded fixes; on failure re-run only the affected suite
+- [x] 5.7 `agent/retry_engine.py` — incremental retry driven by `dependency_graph.json` + git diff
 
 ## Phase 6 — Reporting
 

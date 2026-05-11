@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 
 from ...agent.execution_controller import execute_all
+from ...flaky.detector import detect_flaky
+from ...healing.engine import heal_failures
 from ...quality.generation_loop import run_generation_loop
 from ...quality.scenario_generator import build_baseline_scenarios
 from ...runtime.install_manager import run_installs
@@ -57,8 +59,36 @@ def run(args: argparse.Namespace) -> int:
     total = sum(r.passed + r.failed + r.skipped for r in results)
     failed = sum(r.failed for r in results)
     log.info("full-run: executed %d tests across %d groups; failed=%d", total, len(results), failed)
+
+    # Self-heal: try to fix deterministic failures, then once more.
+    if failed:
+        failures = _collect_failure_logs(results)
+        attempts = heal_failures(root, failures)
+        applied = [a for a in attempts if a.applied]
+        if applied:
+            log.info("full-run: healing applied to %d test file(s) — re-executing", len(applied))
+            results = execute_all(root, generated, ws.run_id)
+            failed = sum(r.failed for r in results)
+
+    # Flaky detection on whatever's still failing.
+    history = sm.execution_history()
+    flaky = detect_flaky(root, generated, history)
+    sm.save(flaky)
+    log.info("full-run: flaky=%d", len(flaky.entries))
+
     log.info("full-run: reporting phase not yet implemented (see ROADMAP.md)")
     return 0 if failed == 0 else 0  # don't fail CLI; report carries the verdict
+
+
+def _collect_failure_logs(results) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for r in results:
+        if r.failed <= 0 or r.process is None:
+            continue
+        text = (r.process.stderr_tail or "") + "\n" + (r.process.stdout_tail or "")
+        for path in r.test_files:
+            out.append((path, text))
+    return out
 
 
 def _avg(xs: list[float]) -> float:
