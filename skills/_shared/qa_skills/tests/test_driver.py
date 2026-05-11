@@ -123,16 +123,35 @@ def test_task_subprocess_invokes_correct_cli_args():
         stdout=_wrap('{"agent":"x","status":"ok"}'), stderr="",
     )
     with patch("qa_skills.driver.subprocess.run", return_value=fake) as mock_run:
-        task_subprocess("qa-unit-test", {"foo": "bar"}, project_root="/p")
+        task_subprocess(
+            "qa-unit-test", {"foo": "bar"},
+            project_root="/p", plugin_dir="/pl",
+        )
     args, kwargs = mock_run.call_args
     cmd = args[0]
     assert "--print" in cmd
+    assert "--bare" in cmd  # cuts plugin sync / hooks / CLAUDE.md
+    assert "--plugin-dir" in cmd and cmd[cmd.index("--plugin-dir") + 1] == "/pl"
     assert "--agent" in cmd and cmd[cmd.index("--agent") + 1] == "qa-unit-test"
     assert "--output-format" in cmd and "json" in cmd
     assert "--permission-mode" in cmd and "bypassPermissions" in cmd
     assert "--add-dir" in cmd and "/p" in cmd
     # Payload goes through stdin.
     assert json.loads(kwargs["input"]) == {"foo": "bar"}
+
+
+def test_task_subprocess_infers_plugin_dir_when_omitted():
+    fake = subprocess.CompletedProcess(
+        args=["claude"], returncode=0,
+        stdout=_wrap('{"agent":"x","status":"ok"}'), stderr="",
+    )
+    with patch("qa_skills.driver.subprocess.run", return_value=fake) as mock_run:
+        task_subprocess("qa-unit-test", {})
+    cmd = mock_run.call_args[0][0]
+    assert "--plugin-dir" in cmd
+    # Inferred path should end at plugin root (parent of skills/).
+    inferred = cmd[cmd.index("--plugin-dir") + 1]
+    assert inferred.endswith("QA-Skills") or "qa-skills" in inferred.lower(), inferred
 
 
 def test_task_subprocess_raises_on_nonzero_exit():

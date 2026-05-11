@@ -1195,10 +1195,17 @@ def run(
     if task_call is not None:
         tc = task_call
     else:
-        # Bind project_root into the default subprocess invocation so
-        # sub-agents have file-system access to the target project.
+        # Bind project_root + plugin_dir into the default subprocess
+        # invocation so sub-agents (a) have file-system access to the
+        # target project and (b) actually load qa-skills plugin agents.
+        # Plugin dir = parent of scripts/ = 4 levels up from this file.
         from functools import partial
-        tc = partial(task_subprocess, project_root=str(Path(args.project_root).resolve()))
+        plugin_dir = str(Path(__file__).resolve().parent.parent.parent.parent)
+        tc = partial(
+            task_subprocess,
+            project_root=str(Path(args.project_root).resolve()),
+            plugin_dir=plugin_dir,
+        )
 
     if not Path(args.project_root).exists():
         _fail(1, "project_root_missing", args.project_root)

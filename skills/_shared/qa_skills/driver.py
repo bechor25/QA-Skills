@@ -155,6 +155,15 @@ def _extract_json_object(text: str) -> Optional[dict | list]:
     return None
 
 
+def _plugin_root_path() -> str:
+    """Plugin root inferred from this module's location.
+
+    Layout: ${PLUGIN_ROOT}/skills/_shared/qa_skills/driver.py
+    """
+    from pathlib import Path as _Path
+    return str(_Path(__file__).resolve().parent.parent.parent.parent)
+
+
 def task_subprocess(
     agent: str,
     payload: dict,
@@ -163,6 +172,7 @@ def task_subprocess(
     claude_bin: str = "claude",
     extra_env: Optional[dict] = None,
     project_root: Optional[str] = None,
+    plugin_dir: Optional[str] = None,
 ) -> dict:
     """Default runtime implementation of `TaskCall`.
 
@@ -173,10 +183,20 @@ def task_subprocess(
     CLI shape (claude-code v2.x):
 
         claude --print \\
+               --bare \\
+               --plugin-dir <plugin_root> \\
                --agent <agent> \\
                --output-format json \\
                --permission-mode bypassPermissions \\
                [--add-dir <project_root>]
+
+    `--plugin-dir` is CRITICAL: without it, the nested `claude` process does
+    NOT load qa-skills agents, and `--agent qa-code-analyzer` silently
+    matches no plugin agent (falls back to default behavior → no analysis
+    written → caller assumes failure → infinite retry loop).
+
+    `--bare` skips hooks / LSP / plugin sync / CLAUDE.md auto-discovery to
+    minimize per-spawn startup latency.
 
     The payload (a dict) is JSON-encoded and piped to stdin; the sub-agent
     sees it as the user prompt.
@@ -193,8 +213,12 @@ def task_subprocess(
     if extra_env:
         env.update(extra_env)
 
+    plugin = plugin_dir or _plugin_root_path()
+
     cmd = [
         claude_bin, "--print",
+        "--bare",
+        "--plugin-dir", plugin,
         "--agent", agent,
         "--output-format", "json",
         "--permission-mode", "bypassPermissions",
