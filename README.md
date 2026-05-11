@@ -38,19 +38,52 @@ That's it. Claude asks for the project path if missing and handles everything el
 - Incremental runs — only changed files re-tested after the first run.
 - Resume — if a run is interrupted, picks up where it left off.
 
-## Architecture (v2 — refactored)
+## Architecture (v2.0 — Python-driven)
 
-Two-layer design:
+Three-layer design:
 
-- **Skills** (`skills/`) — thin trigger entry points loaded into the main Claude Code context. ~25 lines each.
-- **Agents** (`agents/`) — heavy QA logic running in their own isolated subagent contexts. The main thread only sees small JSON results, never test code or `jest`/`pytest` output.
+- **Skills** (`skills/`) — thin user-facing trigger entry points (~25 lines).
+- **Driver** (`skills/_shared/scripts/qa_run.py`) — Python pipeline runner.
+  Owns all sequencing, verification, execution, and reporting. Every phase
+  is a function call against `qa_skills/*.py` modules with deterministic
+  outputs and 337 pytest tests behind it.
+- **Agents** (`agents/`) — bounded LLM specialists invoked by the driver.
+  Each test-gen agent receives a tiny prompt scoped to **one file** at a
+  time. The orchestrator agent is a thin (~100-line) Bash wrapper around
+  `qa_run.py` — no LLM-level sequencing.
 
-This isolation:
-- Keeps the main context small even on large projects.
-- Cost-optimizes — each agent runs on the right model (Haiku for parsing, Sonnet for generation, Opus for UI/security).
-- Stops runaway loops — every agent has a token budget cap and pre-flight server checks.
+Why this shape:
 
-See [AGENT.md](AGENT.md) for full design and rationale.
+- **Honest by construction.** The driver writes `report-data.json` directly
+  via `build_report_data`; there is no path for fake quality scores or
+  skipped execution. Every `agent_output_*.json` and `execution_*.json` is
+  persisted by Python after the sub-agent returns.
+- **Bounded LLM context.** Sub-agents see one expected_file + one
+  `domain_brief` slice + ≤5 prior paths, capped at 4096 chars per prompt.
+  No more "Generate all remaining" shortcuts on large projects.
+- **Resumable.** `batch_state.json` makes the dispatch phase idempotent;
+  killed runs pick up at the first incomplete batch.
+
+See [ARCHITECTURE_DIAGNOSTIC.md](ARCHITECTURE_DIAGNOSTIC.md) for the v1 →
+v2 rationale and [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the
+migration steps. See [AGENT.md](AGENT.md) for all trigger phrases.
+
+### Pipeline phases (all driven by `qa_run.py`)
+
+| # | Phase           | Layer  | Output on disk                          |
+|---|-----------------|--------|-----------------------------------------|
+| 0 | Setup           | Python | `.qa-skills/{checkpoints,logs}/`       |
+| 1 | Scan            | LLM    | `logs/analysis.json` (qa-code-analyzer) |
+| 2 | Strategy        | Python | `logs/strategy.json`, `logs/expected_files.json` |
+| 2.7 | Domain learn  | LLM    | `logs/domain_brief_<cat>.json` (qa-domain-analyzer, per planned cat) |
+| 3 | Dispatch        | LLM (file-per-Task) + Python | `logs/agent_output_*.json`, `logs/execution_*.json`, `logs/batch_state.json` |
+| 5 | Flaky           | LLM    | `logs/flaky.json` (qa-flaky-detector)   |
+| 5.5 | Learnings     | Python | `.qa-skills/learnings.json`, `learnings.log` |
+| 6 | State write     | Python | `test-state.json`                       |
+| 7 | Quality         | Python | patches `report-data.json`              |
+| 8 | Build report    | Python | `test-reports/report-data.json` (v2)    |
+| 8b | HTML render    | LLM    | `test-reports/report-*.html` (qa-html-reporter) |
+| 9 | Final gate      | Python | `checkpoints/run.json` (`completed: true`) |
 
 ## Supported languages
 
@@ -73,14 +106,14 @@ TypeScript / JavaScript · Python
 | `env-validator` | Checks toolchain + dependencies |
 | `git-diff-analyzer` | Classifies code changes |
 | `code-analyzer` | Scans codebase structure |
-| `coverage-reporter` | Aggregates results + Quality Score |
 | `html-reporter` | Self-contained HTML report |
 
 ### Agents (workers)
 
 | Agent | Model | Purpose |
 |-------|-------|---------|
-| `qa-orchestrator` | sonnet | Coordinates the full flow + Strategy phase |
+| `qa-orchestrator` | haiku | Thin Bash wrapper around `scripts/qa_run.py` — no LLM sequencing |
+| `qa-domain-analyzer` | sonnet | Extracts per-file `behaviors[]` + `test_hints[]` so test-gen sub-agents emit per-behavior tests instead of boilerplate |
 | `qa-code-analyzer` | haiku | Scans codebase, writes `analysis.json` |
 | `qa-env-validator` | haiku | Checks toolchain |
 | `qa-git-diff-analyzer` | haiku | Classifies per-module diff severity |
@@ -91,8 +124,7 @@ TypeScript / JavaScript · Python
 | `qa-a11y-test` | sonnet | WCAG axe-core tests |
 | `qa-contract-test` | sonnet | Schema / golden master |
 | `qa-flaky-detector` | haiku | 3× re-run analysis |
-| `qa-coverage-reporter` | haiku | Builds `report-data.json` |
-| `qa-html-reporter` | haiku | Renders HTML report |
+| `qa-html-reporter` | haiku | Renders HTML report (report-data assembled by Python driver, not by an agent) |
 
 ## Configuration overrides
 

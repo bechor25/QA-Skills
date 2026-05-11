@@ -53,11 +53,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/flaky.py" \
 
 # Output requirements for `flaky_tests[]`
 
-This array feeds `flaky_history[]` in `learnings.json` (coverage-reporter Phase 5.5). Every entry MUST conform to `reference/learnings-schema.md`:
+This array feeds `flaky_history[]` in `learnings.json` via the driver's Phase 5.5 (`qa_skills.learnings.persist_learnings`). Every entry MUST conform to `reference/learnings-schema.md`:
 
 - `test_path` — `path::test_name` form. Must resolve to a real test file in this run.
 - `flake_count` — `1` or `2` only (3-fail = broken; 0-fail = stable). Wrapper enforces this.
-- `runs_observed` — `[run_id]`. Coverage-reporter merges with prior runs.
+- `runs_observed` — `[run_id]`. Driver merges with prior runs.
 - `cause_hypothesis` / `suggested_fix` — free text, decorative.
 
 # Hard rules

@@ -60,7 +60,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/learnings.py" \
 # Hard rules
 
 - Never modify user fields (`user_status`, `dismiss_reason`).
-- Never write new `vuln_patterns` or `flaky_history` entries — that is coverage-reporter Phase 5.5.
+- Never write new `vuln_patterns` or `flaky_history` entries — that is `qa_skills.learnings.persist_learnings` (driver Phase 5.5).
 - Never invent rules, paths, or hashes.
 - Never re-implement validation — the Python module is the single source of truth (acceptance pytest: `skills/_shared/qa_skills/tests/test_learnings.py`).
 - If wrapper exits non-zero → return `{"agent": "qa-learnings-validator", "status": "error", "reason": "<stderr>"}`.
