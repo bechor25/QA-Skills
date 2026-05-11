@@ -10,7 +10,7 @@ description: >
   Hebrew triggers (עברית): "בדוק את ה-API שלי", "בדיקות API", "בדוק את ה-endpoints שלי",
   "כתוב בדיקות API", "בדוק תשובות HTTP", "בדיקות REST", "בדוק נקודות קצה".
 
-  Supports: httpx (Python), supertest (Node.js), RestAssured (Java), HttpClient (C#).
+  Supports: httpx (Python), supertest (Node.js).
 ---
 
 # api-test (entry point)
@@ -23,7 +23,7 @@ Thin trigger skill. Delegates to `qa-skills:qa-api-test` agent.
 2. Resolve `project_root`.
 3. **Pre-step — env-validator:** invoke `qa-skills:qa-env-validator` with `{categories_enabled: ["api"], auto_install: true}`. Installs supertest/httpx + test framework if missing. Abort if `api` removed.
 4. Invoke `qa-skills:qa-code-analyzer` to get routes.
-5. Detect API server URL from project config (uvicorn port, spring boot port, package.json scripts). Default `http://localhost:8000`.
+5. Use `analysis.server_hint` to build `server_plan` via orchestrator's `build_server_plan(analysis, mode)` rule. Default `start_allowed=false`.
 6. Invoke `qa-skills:qa-api-test` agent with:
    ```json
    {
@@ -33,7 +33,7 @@ Thin trigger skill. Delegates to `qa-skills:qa-api-test` agent.
      "modules": [...],
      "locale": "he|en",
      "preflight": {
-       "server_check_url": "<detected>",
+       "server_plan": { "url": "...", "start_command": "...", "start_allowed": false, "timeout_seconds": 30, "cleanup_pid": null },
        "abort_if_no_server": true
      },
      "budgets": {"max_tokens": 80000, "max_seconds": 600}

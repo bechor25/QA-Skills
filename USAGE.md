@@ -106,8 +106,6 @@ To force a full regeneration: `regenerate all tests` or `force full test run`.
 |----------|-----------|-----------|----------|----------|--------------|---------|
 | TypeScript / JavaScript | Jest / Vitest | supertest | Playwright | ✓ | ✓ | ✓ |
 | Python | pytest | httpx | Playwright | ✓ | ✓ | ✓ |
-| Java | JUnit 5 + Mockito | RestAssured | — | ✓ | — | ✓ |
-| C# / .NET | NUnit + Moq | HttpClient | — | ✓ | — | ✓ |
 
 ### Standalone skill use (advanced)
 
@@ -265,8 +263,6 @@ claude plugin uninstall qa-skills
 |-----|-------------|-----------|----------|-------|--------|------|
 | TypeScript / JavaScript | Jest / Vitest | supertest | Playwright | ✓ | ✓ | ✓ |
 | Python | pytest | httpx | Playwright | ✓ | ✓ | ✓ |
-| Java | JUnit 5 + Mockito | RestAssured | — | ✓ | — | ✓ |
-| C# / .NET | NUnit + Moq | HttpClient | — | ✓ | — | ✓ |
 
 ### שימוש עצמאי בסקילים (מתקדם)
 

@@ -21,7 +21,7 @@ Thin trigger skill. Delegates to `qa-skills:qa-a11y-test` agent.
 2. Resolve `project_root`.
 3. **Pre-step — env-validator:** invoke `qa-skills:qa-env-validator` with `{categories_enabled: ["a11y"], auto_install: true}`. Installs Playwright + axe-core/playwright if missing. Abort if `a11y` removed.
 4. Invoke `qa-skills:qa-code-analyzer` to get frontend_files + routes.
-5. Detect frontend dev server URL.
+5. Build `server_plan` from `analysis.server_hint` via orchestrator's `build_server_plan(analysis, mode)` rule.
 6. Invoke `qa-skills:qa-a11y-test` agent with:
    ```json
    {
@@ -29,7 +29,10 @@ Thin trigger skill. Delegates to `qa-skills:qa-a11y-test` agent.
      "frontend_files": [...],
      "routes": [...],
      "locale": "he|en",
-     "preflight": {"server_check_url": "<detected>", "abort_if_no_server": true},
+     "preflight": {
+       "server_plan": { "url": "...", "start_command": "...", "start_allowed": false, "timeout_seconds": 30, "cleanup_pid": null },
+       "abort_if_no_server": true
+     },
      "budgets": {"max_tokens": 60000, "max_seconds": 480}
    }
    ```

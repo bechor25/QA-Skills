@@ -11,6 +11,21 @@ You are the QA-Skills HTML reporter. Cheap and fast. Run in isolated context.
 
 Read `report-data.json`. Generate a single self-contained HTML file (all CSS/JS inline, no CDN). Open it in the browser. Return path.
 
+# Implementation — call the Python renderer
+
+Template logic lives in `qa_skills.html_render`. Call:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/html_render.py" \
+  --report-data "${PROJECT_ROOT}/test-reports/report-data.json" \
+  --out "${PROJECT_ROOT}/test-reports/report-${PROJECT_NAME}-${TIMESTAMP}.html"
+# stdout: {"status": "completed", "html_report_path": "..."}
+```
+
+Acceptance pytest: `skills/_shared/qa_skills/tests/test_html_render.py` (10 tests). Do not generate HTML with the LLM — the Python module is deterministic, faster, and tested.
+
+The remaining sections below describe the rendering contract that `qa_skills.html_render` already implements; they are kept as documentation, not as instructions for the LLM.
+
 # Inputs
 
 ```json
@@ -76,7 +91,11 @@ ${project_root}/test-reports/report-{PROJECT_NAME}-{YYYYMMDD-HHMM}.html
 
 1. **Header bar** — project name, run timestamp, run type, locale toggle (visual only).
 2. **Quality scorecard** — big number `quality_score/100`, color: ≥80 green, 50–79 orange, <50 red.
-3. **Coverage by category** — bar for each: unit, api, ui, security, a11y, contract. Show pct + covered/total.
+3. **Coverage by category** — bar for each: unit, api, ui, security, a11y, contract.
+   - Show `pct%`, `|covered_items| / total`, status badge from `coverage_by_category[cat].status` (`passed` / `partial` / `error` / `skipped:<reason>`).
+   - Inside each category card, render `missing_items[]` as a collapsible "Uncovered (N)" `<details>` block — list each missing item one per line. Empty `missing_items[]` → render "All covered ✅".
+   - When `total == 0` → render "N/A — no signal in this project" (do NOT render a red 0% gauge).
+   - When `status` starts with `skipped:`, show the reason as a tooltip on the badge and skip the gauge.
 4. **UI artifacts** (only if `ui_artifacts.playwright_report` non-null):
    - Button "Open Playwright report ↗" → links to `ui_artifacts.playwright_report` (relative path, opens in new tab).
    - Screenshot gallery: thumbnail grid of `ui_artifacts.screenshots[]` (first 24). Each is a `<a href="<rel>" target="_blank"><img src="<rel>" loading="lazy" style="max-width:200px;max-height:140px"></a>`. Wrap in collapsible `<details>` if > 8.

@@ -17,7 +17,7 @@ Verify the project environment is ready for test generation. Check toolchains, t
 {
   "run_id": "uuid",
   "project_root": "/abs/path",
-  "language": "typescript|python|java|csharp",
+  "language": "typescript|javascript|python",
   "categories_enabled": ["unit", "api", "ui", "security", "a11y", "contract"],
   "checkpoint_dir": "/abs/path/.qa-skills/checkpoints",
   "locale": "he|en",
@@ -60,8 +60,8 @@ Also write `${checkpoint_dir}/env.json` with full check report.
 |----------|---------|
 | typescript/javascript | `node -v` |
 | python | `python3 --version` |
-| java/kotlin | `mvn -v` |
-| csharp | `dotnet --version` |
+
+Unsupported language → `status: error`, `reason: "unsupported_language: <lang>"`. Only typescript/javascript/python proceed.
 
 If `fail` → status: error, return immediately. No tests can be generated.
 
@@ -89,10 +89,6 @@ All branches follow Phase 3a auto-install flow.
 - Install cmd: `pip install pytest-json-report` (in venv if present).
 - Fail → keep categories but warn `"json_report_missing_fallback_to_stdout_parsing"`.
 
-**Java:** check `pom.xml` has `junit-jupiter`. Else → no unit. (No auto-install: requires manual `pom.xml` edit and dependency resolution; safer to surface action.)
-
-**C#:** check `*.csproj` references `NUnit` or `xunit`. Else → no unit. (No auto-install: project file edits + `dotnet add package` is destructive in unknown solution layouts.)
-
 ## 3. UI prerequisites (only if `ui` or `a11y` in categories)
 
 Branch by `language`. For each missing prerequisite, follow the `auto_install` flow (Phase 3a below).
@@ -115,8 +111,6 @@ UI and a11y have separate (overlapping) prerequisites. Treat them as two checks.
 **Python — `a11y`** (only if `a11y` in categories):
 - Check: `python3 -c "import axe_playwright_python" 2>/dev/null`
 - Install cmd: `pip install axe-playwright-python` (in venv if present)
-
-**Java/C#:** UI/a11y not supported in v1 → remove `ui`, `a11y` with reason `"unsupported_language"`. No install attempt.
 
 For all branches: also verify the dev server URL is configured (read `analysis.frontend_dev_server`). Missing → keep `ui` enabled but add warning `"server_url_unknown"`.
 
@@ -190,8 +184,6 @@ Follow Phase 3a auto-install flow. Record under `installs_performed` so user see
 Try a fast no-op build/typecheck:
 - TS: `npx tsc --noEmit --pretty false` (timeout 30s)
 - Python: `python3 -c "import sys; sys.exit(0)"` (always passes — placeholder)
-- Java: skip (mvn compile is too slow for env check)
-- C#: skip
 
 If TS typecheck fails with errors → warn, but don't remove categories (tests can still help find bugs).
 

@@ -1,6 +1,6 @@
 {
   "name": "qa-skills",
-  "description": "Full QA test suite generator for any codebase. One command generates unit, API, UI, and security tests, runs them, fixes failures, and produces an HTML coverage report. Supports TypeScript, Python, Java, C#.",
+  "description": "Full QA test suite generator for any codebase. One command generates unit, API, UI, and security tests, runs them, fixes failures, and produces an HTML coverage report. Supports TypeScript/JavaScript and Python.",
   "author": {
     "name": "Bechor Simhaev",
     "url": "https://github.com/bechor25"

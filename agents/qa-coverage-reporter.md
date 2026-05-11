@@ -41,7 +41,7 @@ Aggregate all test outputs, state, flaky info, and quality score into `report-da
   "coverage_by_category": {
     "unit": {"pct": 78, "covered": 12, "total": 15},
     "api": {"pct": 100, "covered": 4, "total": 4},
-    "ui": {"pct": 0, "covered": 0, "total": 6, "reason": "skipped_no_server",
+    "ui": {"pct": 0, "covered": 0, "total": 6, "reason": "skipped:no_server",
             "artifacts": {"playwright_report": null, "test_results_dir": null, "screenshots": [], "videos": [], "traces": []}},
     "security": {"pct": 60, "covered": 3, "total": 5},
     "a11y": {"pct": 80, "covered": 4, "total": 5,
@@ -67,43 +67,52 @@ For each module in `analysis.modules`:
 
 # Phase 2 — Category coverage
 
-Category coverage is computed **strictly from `all_test_outputs`** — i.e., from what each test-generation agent actually produced in this run. Never infer coverage from `analysis.frontend_files` or `analysis.routes` alone.
+Category coverage is computed via `qa_skills.coverage.compute_coverage(category, agent_outputs, analysis)` — **real-units math**, not `passed_files / total_routes`.
 
-Mapping:
+| Category | Source agent       | Universe (denominator)                                  | Coverage unit               |
+|----------|--------------------|---------------------------------------------------------|-----------------------------|
+| unit     | `qa-unit-test`     | non-frontend modules from `analysis.modules`            | source module path          |
+| api      | `qa-api-test`      | api routes from `analysis.routes` (`kind == "api"`)     | `"METHOD /path"`            |
+| contract | `qa-contract-test` | api routes                                              | `"METHOD /path"`            |
+| security | `qa-security-test` | api routes                                              | `"METHOD /path"`            |
+| ui       | `qa-ui-test`       | page files from `analysis.frontend_files`               | frontend file path          |
+| a11y     | `qa-a11y-test`     | page files                                              | frontend file path          |
 
-| Category | Source agent(s) | Relevant universe |
-|---|---|---|
-| unit     | `qa-unit-test`     | modules with type in [service, util, model, middleware] |
-| api      | `qa-api-test`      | routes (controller modules) |
-| ui       | `qa-ui-test`       | `analysis.frontend_files` (denominator only) |
-| security | `qa-security-test` | modules with has_auth OR has_db_queries OR input_fields |
-| a11y     | `qa-a11y-test`     | `analysis.frontend_files` (denominator only) |
-| contract | `qa-contract-test` | routes |
+Implementation — call the report-builder wrapper, which uses `qa_skills.report_builder.build_report_data` under the hood:
 
-For each category:
-```python
-# 1. did env-validator remove this category before dispatch?
-removed = next((r for r in env_categories_removed if r["name"] == cat), None)
-if removed:
-    coverage[cat] = {"pct": 0, "covered": 0, "total": <relevant_count>,
-                     "status": "skipped_missing_dep", "reason": removed["reason"],
-                     "action": removed.get("action")}
-    continue
+```bash
+# 1. Write inputs JSON to disk (orchestrator already passed these to you)
+cat > "${TMPDIR:-/tmp}/cov-inputs-${RUN_ID}.json" <<EOF
+{
+  "analysis_path":          "${ANALYSIS_PATH}",
+  "run_id":                 "${RUN_ID}",
+  "project_root":           "${PROJECT_ROOT}",
+  "all_test_outputs":       <ALL_TEST_OUTPUTS_JSON>,
+  "env_categories_removed": <ENV_REMOVED_JSON>,
+  "env_installs_performed": <ENV_INSTALLS_JSON>,
+  "flaky_tests":            <FLAKY_JSON>,
+  "timeline":               <TIMELINE_JSON>,
+  "locale":                 "${LOCALE}",
+  "run_type":               "${RUN_TYPE}",
+  "learnings_summary":      <LEARNINGS_SUMMARY_JSON>
+}
+EOF
 
-# 2. else look at the source agent's actual output
-agent_output = next((o for o in all_test_outputs if o.agent == source_agent), None)
-if agent_output is None:
-    coverage[cat] = {"pct": 0, "covered": 0, "total": <relevant_count>, "status": "not_generated"}
-    continue
-if agent_output.status in ("skipped_no_server", "skipped_wrong_server", "skipped_unsupported_language", "error"):
-    coverage[cat] = {"pct": 0, "covered": 0, "total": <relevant_count>, "status": agent_output.status, "reason": agent_output.get("reason")}
-    continue
-covered = sum(1 for spec in agent_output.outputs if spec.execution_result == "passed")
-total   = len(relevant_universe)
-coverage[cat] = {"pct": int(covered/total*100) if total else 0, "covered": covered, "total": total, "files": [s.path for s in agent_output.outputs], "status": agent_output.status}
+# 2. Build report-data.json (covers + gaps + quality_score + artifacts + status normalization)
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/report_builder.py" \
+  --inputs "${TMPDIR:-/tmp}/cov-inputs-${RUN_ID}.json" \
+  --out    "${PROJECT_ROOT}/test-reports/report-data.json"
+# stdout: {"status": "completed", "report_data_path": "...", "quality_score": N}
 ```
 
-**Hard rule:** `coverage[cat].files` MUST be a subset of `agent_output.outputs[].path`. Never list a test file in `ui` that was not produced by `qa-ui-test`. Same for every other category. Existing TestClient/HTTP-level files do NOT count toward `ui`.
+`build_report_data` orchestrates: `compute_coverage` (real-units math), `collect_artifacts` (UI/a11y media), `identify_gaps` (severity rules), `compute_quality_score`, plus status normalization (`skipped_no_server` → `skipped:no_server`, etc).
+
+**Hard rule (enforced by `compute_coverage`):**
+- `coverage[cat].files` is built from `agent_output.outputs[].path` only — cannot list paths the agent did not produce.
+- `coverage[cat].covered_items` is the intersection of agent-reported `covers[]` and the analysis universe — phantom items (sub-agent claims to cover a route that does not exist) are filtered out.
+- `coverage[cat].missing_items` shows the user exactly what is uncovered.
+
+**Status enum (closed):** `passed | partial | error | skipped:<reason_code>`. Drop legacy `skipped_no_server` / `skipped_wrong_server` / `not_generated` strings — translate them to `skipped:no_server`, `skipped:wrong_server`, `skipped:not_generated`.
 
 # Phase 2.5 — Collect UI/a11y artifacts
 

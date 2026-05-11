@@ -47,7 +47,7 @@ Run a complete QA flow on a project: scan → state diff → environment validat
   "categories": {
     "unit":     {"status": "passed", "tests": 12, "tokens": 38000},
     "api":      {"status": "passed", "tests": 8,  "tokens": 22000},
-    "ui":       {"status": "skipped_no_server", "tests": 0, "tokens": 1000},
+    "ui":       {"status": "skipped:no_server", "tests": 0, "tokens": 1000},
     "security": {"status": "passed", "tests": 4,  "tokens": 18000}
   },
   "report_path": "/abs/path/test-reports/report-...html",
@@ -137,75 +137,23 @@ Write checkpoint after every phase:
 
 Invoke `qa-code-analyzer` via Task tool. Pass `RunContext`. Agent writes `analysis.json` to `${logs_dir}/analysis.json` and returns a small summary (counts, language, paths). Update `RunContext.language` from result.
 
-## Phase 1a — Validate analyzer output (REQUIRED — execute every step)
+## Phase 1a — Validate analyzer output (single Python call)
 
-> ⚠️⚠️⚠️ **BLOCKING — MUST EXECUTE VIA Bash TOOL** ⚠️⚠️⚠️
->
-> Every code block in this Phase is a **command you MUST run with the Bash tool**, not pseudocode to summarize. If you skip the Bash invocations, the orchestrator violates its own contract and the run is **invalid**.
->
-> Compliance check: at end of Phase 1a, verify your message log contains the bash commands above with their actual stdout. If absent → re-do Phase 1a from Step 1.a.1 before continuing.
-
-**This is not a description. Execute each step in order via the Bash tool. Do not skip. Do not summarize.**
-
-### Step 1.a.1 — Read analysis.json
 ```bash
-cat "${ANALYSIS_PATH}"
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_analysis.py" --analysis "${ANALYSIS_PATH}"
 ```
-Pipe into your context. You need the actual content, not a summary.
 
-### Step 1.a.2 — Strip forbidden keys (run via Bash)
-```bash
-python3 - <<'EOF'
-import json, sys
-PATH = "${ANALYSIS_PATH}"
-data = json.loads(open(PATH).read())
-forbidden = ["source_root","framework","python_async_detected","effective_project_root"]
-stripped = [k for k in forbidden if k in data]
-for k in stripped: del data[k]
-# Also strip stats.framework / stats.language / stats.total_routes if present
-if isinstance(data.get("stats"), dict):
-    for k in ("framework","language","total_routes"):
-        data["stats"].pop(k, None)
-open(PATH, "w").write(json.dumps(data, indent=2))
-print(json.dumps({"stripped_top": stripped}))
-EOF
-```
-If output shows non-empty `stripped_top` → emit banner: `🔍 qa-code-analyzer | stripped invented fields: <list>`.
+Behavior — `qa_skills.analysis.load_analysis(...)`:
+1. Strips forbidden top-level keys (`source_root`, `framework`, `python_async_detected`, `effective_project_root`) and `stats.{framework,language,total_routes}`. Records the stripped list in stderr.
+2. Validates required keys + route enums (`kind` ∈ {api,page,asset,unknown}, `produces` ∈ {json,html,unknown}) + module shape + `frontend_files[]` is object array.
+3. Forces `project_root` to match `RunContext.project_root` when they differ; appends `project_root_overridden_to_runcontext` to warnings.
 
-### Step 1.a.3 — Validate required keys (run via Bash, exit non-zero on fail)
-```bash
-python3 - <<'EOF'
-import json, sys
-data = json.loads(open("${ANALYSIS_PATH}").read())
-required = ["language","scanned_at","project_root","frontend_kind","modules","routes","frontend_files","stats","warnings"]
-missing  = [k for k in required if k not in data]
-if missing:
-    print(f"FAIL missing: {missing}", file=sys.stderr); sys.exit(2)
-if not isinstance(data["modules"], list):
-    print("FAIL modules_not_array", file=sys.stderr); sys.exit(3)
-route_keys = {"method","path","handler","file","requires_auth"}
-bad_routes = [i for i,r in enumerate(data.get("routes",[])) if not route_keys.issubset(r.keys())]
-if bad_routes:
-    print(f"WARN routes missing keys at indices {bad_routes}", file=sys.stderr)
-print("OK")
-EOF
-```
-- exit 0 → continue.
-- exit 2 (missing) OR exit 3 (modules_not_array) → re-invoke code-analyzer ONCE with prompt suffix: `"Your previous output failed validation: <stderr>. Re-emit STRICTLY matching the Phase 5 template. modules MUST be a JSON array, not a dict. Do not add fields outside the schema."` Re-run Step 1.a.3. Still fails → abort run with `status: error, reason: "code_analyzer_schema_violation: <stderr>"`.
+Exit handling:
+- exit 0 → emit banner `🔍 qa-code-analyzer | analysis OK` (with stripped-fields suffix when relevant) and continue.
+- exit 2 → re-invoke `qa-code-analyzer` ONCE with prompt suffix: `"Your previous output failed validation: <stderr>. Re-emit STRICTLY matching qa-code-analyzer.md Phase 5 template. modules MUST be a JSON array, every route MUST include kind+produces, frontend_files MUST be objects. Do not add fields outside the schema."` Re-run validator. Still fails → abort with `status: error, reason: "code_analyzer_schema_violation: <stderr>"`.
+- exit 3 → file unreadable / parse error. Abort with `status: error, reason: "analysis_unreadable"`.
 
-### Step 1.a.4 — Force project_root to match RunContext (run via Bash)
-```bash
-python3 - <<'EOF'
-import json
-PATH = "${ANALYSIS_PATH}"; EXPECTED = "${RUN_CONTEXT_PROJECT_ROOT}"
-data = json.loads(open(PATH).read())
-if data.get("project_root") != EXPECTED:
-    data["project_root"] = EXPECTED
-    open(PATH,"w").write(json.dumps(data, indent=2))
-    print("project_root_overridden")
-EOF
-```
-Output `project_root_overridden` → add to `warnings: ["project_root_overridden_to_runcontext"]`.
+> **Hard rule:** do NOT inline `python3 - <<'EOF'` validation heredocs. The single call above replaces the four legacy steps (1.a.1–1.a.4) which lived in this file before the `qa_skills` extraction landed.
 
 Then invoke `qa-git-diff-analyzer`. It updates `analysis.json` in-place (adds `diff_class` per module). Returns counts.
 
@@ -215,7 +163,7 @@ Then invoke `qa-env-validator`. Pass top-level fields (do NOT bury inside `optio
 
 Returns `categories_remaining`, `categories_removed`, `installs_performed`. Update `RunContext.categories_enabled`. Carry `categories_removed` and `installs_performed` into the strategy plan so the user sees what was installed and what was skipped.
 
-When env-validator returns `categories_removed: [{name: "ui", reason: "..."}]`, propagate the reason to the final report. **Never let coverage-reporter overwrite it with `"skipped_no_server"` or any other default.**
+When env-validator returns `categories_removed: [{name: "ui", reason: "..."}]`, propagate the reason to the final report. **Never let coverage-reporter overwrite it with `"skipped:no_server"` or any other default.**
 
 Write checkpoint(1).
 
@@ -267,37 +215,22 @@ Write `RunContext.changed_count`, `RunContext.new_count`. Write checkpoint(2).
 
 **Default mode: `auto` — build the plan, display it to the user as a status line, then proceed immediately. Do not pause for confirmation.**
 
-## `has_signal()` — explicit definition (REQUIRED)
+## `has_signal()` — extracted to `qa_skills.strategy`
 
-Returns `(should_run, skip_reason)`. Use this exact function — do not improvise.
+Logic lives in `qa_skills.strategy.has_signal(category, analysis)`. CLI:
 
-```python
-def has_signal(category, analysis):
-    modules = analysis.get("modules", [])
-    routes  = analysis.get("routes", [])
-    has_fe  = bool(analysis.get("stats", {}).get("has_frontend"))
-    fe_kind = analysis.get("frontend_kind", "none")
-
-    if category == "unit":
-        return ((True,"") if any(m.get("type")!="frontend" for m in modules)
-                else (False,"no_non_frontend_modules"))
-    if category in ("api","contract"):
-        return (True,"") if routes else (False,"no_routes_detected")
-    if category == "ui":
-        if not has_fe: return (False,"no_frontend_detected")
-        if fe_kind == "none": return (False,"frontend_kind_none")
-        if fe_kind not in ("spa","ssr","mixed"): return (False,f"unsupported_frontend_kind:{fe_kind}")
-        return (True,"")
-    if category == "a11y":
-        if not has_fe: return (False,"no_frontend_detected")
-        if fe_kind == "none": return (False,"frontend_kind_none")
-        return (True,"")
-    if category == "security":
-        if any(m.get("has_auth") or m.get("has_db_queries") or m.get("input_fields") for m in modules):
-            return (True,"")
-        return (False,"no_auth_db_or_input_signals")
-    return (False,f"unknown_category:{category}")
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/strategy.py" --analysis "${ANALYSIS_PATH}" --category "${CATEGORY}"
+# stdout: {"category":"api","should_run":true,"reason":""}
 ```
+
+Behavior summary (full source: `skills/_shared/qa_skills/strategy.py`):
+- `unit` → True iff any non-frontend module exists; else `no_non_frontend_modules`.
+- `api` / `contract` → True iff any route has `kind == "api"`; else `no_routes_detected`.
+- `ui` / `a11y` → True iff `stats.has_frontend` AND `frontend_kind ∈ {spa, ssr, mixed}`; else `no_frontend_detected` / `frontend_kind_none` / `unsupported_frontend_kind:<x>`.
+- `security` → True iff any module has `has_auth` OR `has_db_queries` OR non-empty `input_fields`; else `no_auth_db_or_input_signals`.
+
+Do not duplicate this logic in this file or in any sub-agent.
 
 ## Skip reasons enum (closed list)
 
@@ -318,109 +251,39 @@ disabled_by_caller             # caller opted out via input.categories
 
 > ⚠️⚠️⚠️ **BLOCKING — RUN THIS BEFORE BUILDING THE PLAN** ⚠️⚠️⚠️
 >
-> This function is the **only authority** on which test files each sub-agent must produce. Sub-agents do NOT decide structure on their own — they receive `expected_files` as an immutable contract in their input. Without this step, sub-agents fall back to pytest-default `test mirrors source module` behavior and produce mega-files. **You MUST execute this in Phase 2.5, NOT in Phase 3.**
+> This is the **only authority** on which test files each sub-agent must produce. Sub-agents do NOT decide structure on their own — they receive `expected_files` as an immutable contract in their input. **You MUST execute this in Phase 2.5, NOT in Phase 3.**
 
-Use this exact function. Do not improvise.
+Logic lives in `qa_skills.path_planner.compute_expected_files()` (Python module under `${CLAUDE_PLUGIN_ROOT}/skills/_shared/qa_skills/`). This orchestrator does NOT inline the function — call the CLI:
 
-```python
-AUTH_TOPICS = {"login","register","logout","refresh","me","reset","verify",
-               "forgot","signup","signin"}
-
-def derive_domain_and_tag(route_path):
-    p = route_path.lstrip("/")
-    if p.startswith("api/"): p = p[4:]
-    parts = [s for s in p.split("/") if s and not s.startswith("{")]
-    if not parts: return ("root","index")
-    if parts[0] in AUTH_TOPICS: return ("auth", parts[0])
-    if len(parts) == 1: return (parts[0], parts[0])
-    return (parts[0], parts[1])
-
-def is_api_route(r):
-    """Page-routes (SSR HTML) are NOT API. Used by Phase 9d.1.2 too."""
-    return (r.get("path","").startswith("/api/")
-            or r.get("method","GET").upper() not in ("GET","HEAD")
-            or r.get("requires_auth")
-            or r.get("path","").endswith(".json"))
-
-def compute_expected_files(category, analysis, language):
-    """Returns [{path, covers}, ...]. Sub-agent MUST write exactly this set."""
-    routes   = analysis.get("routes", [])
-    modules  = analysis.get("modules", [])
-    fe_files = analysis.get("frontend_files", [])
-    is_py = (language == "python")
-    py_or_ts = lambda stem, sfx_py, sfx_ts: (
-        f"test_{stem}{sfx_py}.py" if is_py else f"{stem}{sfx_ts}.ts")
-
-    # api/contract/security: one file per (domain, tag) of API routes
-    if category in ("api","contract","security"):
-        pairs = {}
-        for r in (rr for rr in routes if is_api_route(rr)):
-            pairs.setdefault(derive_domain_and_tag(r["path"]), []).append(r)
-        suffixes = {
-            "api":      ("",          ".api.test"),
-            "contract": ("",          ".contract.test"),
-            "security": ("_security", ".security.test"),
-        }
-        sfx_py, sfx_ts = suffixes[category]
-        return [
-            {"path": f"tests/{category}/{d}/{py_or_ts(t, sfx_py, sfx_ts)}",
-             "covers": [f"{r['method']} {r['path']}" for r in rs]}
-            for (d,t), rs in sorted(pairs.items())
-        ]
-
-    # ui/a11y: one file per page (template / SPA route)
-    if category in ("ui","a11y"):
-        SKIP_STEMS = {"_base","base","layout","__init__"}
-        pages, seen = [], set()
-        for f in fe_files:
-            if not isinstance(f, str): continue
-            stem = f.rsplit("/",1)[-1].rsplit(".",1)[0]
-            if stem in SKIP_STEMS or stem in seen: continue
-            seen.add(stem); pages.append((stem, f))
-        sfx_ts = ".spec" if category == "ui" else ".a11y.spec"
-        return [
-            {"path": f"tests/{category}/{stem}/{py_or_ts(stem, '', sfx_ts)}",
-             "covers": [src]}
-            for stem, src in pages
-        ]
-
-    # unit: one file per non-frontend module
-    if category == "unit":
-        DROP = {"src","app","lib","pkg","internal","cmd","__init__","tests"}
-        files = []
-        for m in modules:
-            if m.get("type") == "frontend": continue
-            parts = [p for p in m.get("name","").split(".") if p and p not in DROP]
-            if not parts:
-                seg = [s for s in m.get("file","").replace("\\","/").split("/")
-                       if s and s not in DROP]
-                parts = [seg[-1].rsplit(".",1)[0]] if seg else ["root"]
-            short  = parts[-1]
-            domain = parts[-1] if len(parts) == 1 else parts[-2]
-            files.append({
-                "path": f"tests/unit/{domain}/{py_or_ts(short, '', '.test')}",
-                "covers": [m.get("file","")],
-            })
-        return files
-    return []
-```
-
-Run **once per category** in `categories_planned`. Store result in `expected_files_by_category` for use by Phase 3 dispatch.
-
-```python
-expected_files_by_category = {}
-for cat in plan["summary"]["categories_planned"]:
-    expected_files_by_category[cat] = compute_expected_files(cat, analysis, RunContext.language)
-```
-
-Save to `${logs_dir}/expected_files.json` for Phase 9 cross-check:
 ```bash
-python3 - <<'EOF'
-import json
-data = ${EXPECTED_FILES_JSON}
-open("${LOGS_DIR}/expected_files.json","w").write(json.dumps(data, indent=2))
-EOF
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/plan_expected_files.py" --analysis "${ANALYSIS_PATH}" --category "${CATEGORY}"
 ```
+
+Equivalent script entry: `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/plan_expected_files.py" --analysis ... --category ...`. For a single all-categories pass writing the dispatch input file:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/plan_expected_files.py" \
+  --analysis "${ANALYSIS_PATH}" \
+  --all \
+  --out "${LOGS_DIR}/expected_files.json"
+```
+
+Output shape — `${LOGS_DIR}/expected_files.json`:
+```json
+{
+  "unit":     [{"path": "tests/unit/auth/test_auth.py", "covers": ["app/auth.py"]}, ...],
+  "api":      [{"path": "tests/api/auth/test_login.py", "covers": ["POST /api/login"]}, ...],
+  "ui":       [...], "security": [...], "a11y": [...], "contract": [...]
+}
+```
+
+> **Hard rules** (enforced by `qa_skills.path_planner` — covered by acceptance pytest):
+> - `analysis.modules[].path` is the canonical source-path field. Never `m["file"]` / `m["name"]`.
+> - `routes[].kind` is the api-route discriminator. Legacy `is_api_route` heuristic lives only in the analyzer fallback.
+> - `derive_domain_and_tag()` lives in `qa_skills.routes` only — never duplicated in this file or in any sub-agent.
+> - Acceptance pytest at `skills/_shared/qa_skills/tests/test_path_planner.py` is the regression net for this contract.
+
+Use the resulting JSON to slice per category when building each sub-agent's `path_contract.expected_files` in Phase 3 dispatch.
 
 ## Build plan
 
@@ -564,7 +427,7 @@ For `qa-ui-test`:
   "frontend_files": [...],
   "routes": [...],
   "preflight": {
-    "server_check_url": "<resolved at runtime — see below>",
+    "server_plan": "<built by build_server_plan(analysis, mode) — see below>",
     "abort_if_no_server": true,
     "smoke_first": true,
     "marker": "<derive_marker(analysis)>"
@@ -578,22 +441,61 @@ For `qa-ui-test`:
 - Else if `package.json` exists with a known framework → `{type: "title_regex", value: <project_name_regex>}`.
 - Else → `null` (warning, but allowed).
 
-## server_check_url resolution (runtime)
+## server_plan (built in Phase 2.5, threaded to UI/a11y dispatch)
 
-Resolve in this order. First non-empty wins:
+`server_plan` is the **only authority** for server URL + lifecycle. UI/a11y sub-agents receive it; they MUST NOT guess URLs, ports, or whether to start anything.
 
-```python
-url = (
-    analysis.get("frontend_dev_server")
-    or analysis.get("backend_dev_server")
-    or {"spa": "http://localhost:3000", "ssr": "http://localhost:8000", "mixed": "http://localhost:3000", "none": None}.get(analysis.get("frontend_kind"))
-)
-if not url:
-    # do NOT dispatch qa-ui-test; record categories_skipped: [{name: "ui", reason: "no_server_url_resolved"}]
-    skip_ui = True
+### Build `server_plan`
+
+Logic lives in `qa_skills.server.build_server_plan(analysis, mode, allow_start_explicit)`. Invoke via the wrapper script:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/server_plan.py" \
+  --analysis "${ANALYSIS_PATH}" \
+  --mode "${MODE:-auto}" \
+  ${ALLOW_START:+--allow-start}
+# stdout: {"url": "...", "start_command": "...", "start_allowed": false, "timeout_seconds": 30, "cleanup_pid": null}
 ```
 
-Never pass `null` or string `"None"` to qa-ui-test. If resolution fails → skip UI with explicit reason and surface to user, do not let qa-ui-test discover this via curl-fail.
+Behavior summary (full source: `skills/_shared/qa_skills/server.py`):
+- URL resolved in order: `analysis.frontend_dev_server` → `analysis.backend_dev_server` → `server_hint.frontend_port` → `server_hint.backend_port`. None of those → `url = None`.
+- `start_command`: SPA → frontend wins; SSR/mixed → backend wins; else `None`.
+- `start_allowed`: defaults to `False`. Pass `True` only when the user explicitly opted in (interactive mode + AskUserQuestion answer, or CLI flag `--allow-start-server`).
+- Returns dataclass `ServerPlan{url, start_command, start_allowed, timeout_seconds=30, cleanup_pid=None}`. After `start_server(plan)`, `cleanup_pid` is populated.
+
+Do not duplicate this function in this file or in any sub-agent. Acceptance pytest: `skills/_shared/qa_skills/tests/test_server.py`.
+
+### Dispatch decision matrix
+
+| state                                      | action                                                                                |
+|--------------------------------------------|---------------------------------------------------------------------------------------|
+| `url is None`                              | skip ui+a11y, reason `no_server_url_resolved`                                         |
+| `url` set, server reachable (curl 2xx/3xx) | dispatch with `server_plan`                                                           |
+| `url` set, server unreachable, `!start_allowed`, `mode=auto` | skip ui+a11y, reason `server_unreachable_no_start_permission` |
+| `url` set, server unreachable, `!start_allowed`, `mode=interactive` | `AskUserQuestion("Start server: <cmd>?")`. Yes → set `start_allowed=True`, retry. No → skip. |
+| `url` set, server unreachable, `start_allowed`, `start_command is None` | skip ui+a11y, reason `server_unreachable_no_start_command` |
+| `url` set, server unreachable, `start_allowed`, `start_command` set | spawn `start_command` in background, store pid in `cleanup_pid`, poll `url` until `timeout_seconds`, then dispatch. Kill pid on run end. |
+
+### Lifecycle hard rules
+
+- **Never** pass `null` / `"None"` / placeholder string for `server_plan.url`. If unresolved → category skipped, never dispatched.
+- **Never** start a server without `start_allowed=True`.
+- **Never** kill a process you did not spawn. `cleanup_pid` must come from the orchestrator's own `subprocess` call.
+- **Never** let sub-agents resolve URLs themselves. They receive `server_plan.url` or are skipped.
+- Reachability check: `curl -fsS -m 5 <url>/` (root); HTTP 2xx/3xx/4xx counts as "reachable" (server is running, even if root not configured); only timeouts/connection-refused mark unreachable.
+
+### Pass to qa-ui-test / qa-a11y-test
+
+```json
+"preflight": {
+  "server_plan": { "url": "...", "start_allowed": false, ... },
+  "abort_if_no_server": true,
+  "smoke_first": true,
+  "marker": "<derive_marker(analysis)>"
+}
+```
+
+Old field `server_check_url` is **removed** — `server_plan.url` replaces it. Sub-agents that read `server_check_url` must be updated to `server_plan.url`.
 
 ## Failure isolation
 
@@ -630,34 +532,46 @@ Write checkpoint(5).
 
 # Phase 6 — State write
 
-Build new `test-state.json`:
-- Carry over unchanged modules from prior state.
-- Add/update changed modules with new hash, list of test paths, and `execution_result`.
+Use the state-write wrapper (deterministic — carries over unchanged modules from prior state, adds/updates changed modules with new hash + test paths + execution_result):
 
-Write to `${project_root}/test-state.json`.
-Write checkpoint(6).
+```bash
+# 1. Build inputs JSON (collect from all_test_outputs[*].outputs[*].{path,covers,execution_result}).
+cat > "${TMPDIR:-/tmp}/state-inputs-${RUN_ID}.json" <<EOF
+{
+  "analysis_path":              "${ANALYSIS_PATH}",
+  "run_id":                     "${RUN_ID}",
+  "generated_at":               "${NOW_ISO}",
+  "prior_state_path":           "${PROJECT_ROOT}/test-state.json",
+  "test_paths_by_module":       <{module_path: [test_path, ...]}>,
+  "execution_result_by_module": <{module_path: "passed|failed|partial"}>
+}
+EOF
+
+# 2. Write test-state.json
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/state_write.py" \
+  --inputs "${TMPDIR:-/tmp}/state-inputs-${RUN_ID}.json" \
+  --out    "${PROJECT_ROOT}/test-state.json"
+# stdout: {"status": "completed", "state_path": "...", "modules": N}
+```
+
+Write to `${project_root}/test-state.json`. Write checkpoint(6).
 
 # Phase 7 — Quality score
 
-Compute:
+Logic lives in `qa_skills.quality.compute_quality_score(coverage_by_category, flaky_tests, gaps)`. CLI:
 
-```python
-def compute_quality_score(coverage_by_category, flaky_tests, gaps):
-    score = 0
-    weights = {"unit": 0.3, "api": 0.3, "ui": 0.2, "security": 0.2}
-    for cat, weight in weights.items():
-        pct = coverage_by_category.get(cat, {}).get("pct", 0)
-        score += int(pct * weight * 0.8)
-    score -= len(flaky_tests) * 2
-    score -= len([g for g in gaps if g.get("severity") == "high"]) * 5
-    if coverage_by_category.get("contract", {}).get("pct", 0) == 100:
-        score += 5
-    if coverage_by_category.get("a11y", {}).get("critical_violations", 1) == 0:
-        score += 3
-    return max(0, min(100, score))
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/quality.py" --report-data "${PROJECT_ROOT}/test-reports/report-data.json"
+# stdout: {"quality_score": 78}
 ```
 
-Write checkpoint(7).
+Formula (full source: `skills/_shared/qa_skills/quality.py`):
+- Weighted coverage: unit 0.3, api 0.3, ui 0.2, security 0.2 (each scaled ×0.8 → max 80 from coverage)
+- Penalties: −2 per flaky test, −5 per high-severity gap
+- Bonuses: +5 if contract coverage == 100%, +3 if a11y critical_violations == 0
+- Clamped to `[0, 100]`
+
+Acceptance pytest: `skills/_shared/qa_skills/tests/test_quality.py`. Write checkpoint(7).
 
 # Phase 8 — Report
 
@@ -676,282 +590,38 @@ Coverage-reporter writes `report-data.json` and invokes `qa-html-reporter` (whic
 
 Write checkpoint(8).
 
-# Phase 9 — Final gate
+# Phase 9 — Final gate (TRIMMED)
 
-## 9a. Artifact existence
-Verify all 4 contract artifacts on disk. Missing → re-invoke the failing step ONCE → recheck. Still missing → return `status: partial` with explicit `missing_artifacts`.
-
-## 9b. Per-category truthfulness
-For each category in `report-data.json.coverage_by_category`, cross-check against `all_test_outputs`:
-
-```python
-for cat, cov in report_data["coverage_by_category"].items():
-    src_agent = CATEGORY_TO_AGENT[cat]   # e.g. "ui" -> "qa-ui-test"
-    agent_out = next((o for o in all_test_outputs if o["agent"] == src_agent), None)
-    if not agent_out or agent_out["status"] in ("skipped_no_server", "skipped_wrong_server", "skipped_unsupported_language", "not_generated", "error"):
-        if cov.get("pct", 0) > 0 or cov.get("files"):
-            FAIL(f"category {cat} reports coverage but its source agent did not produce outputs")
-        continue
-    expected_paths = {o["path"] for o in agent_out["outputs"]}
-    reported_paths = set(cov.get("files", []))
-    if not reported_paths.issubset(expected_paths):
-        FAIL(f"category {cat} lists files {reported_paths - expected_paths} not produced by {src_agent}")
-```
-
-Any FAIL → return `status: partial` with `warnings: ["coverage_inflated"]` and the offending categories listed.
-
-## 9c. tests_new sum sanity
-```python
-new_total_from_categories = sum(
-    cov.get("tests_new", 0) for cov in report_data["coverage_by_category"].values()
-)
-if abs(report_data["summary"]["tests_new"] - new_total_from_categories) > 0:
-    warnings.append("tests_new_mismatch")
-```
-
-## 9d. Disk existence of every reported test file
-For every `path` in any `coverage_by_category[*].files`:
-```bash
-test -f "${PROJECT_ROOT}/${path}" || FAIL("missing on disk: ${path}")
-```
-
-## 9d.1 — Path contract enforcement (REQUIRED — execute every step)
-
-> 🚨🚨🚨 **BLOCKING GATE — MUST RUN VIA Bash TOOL** 🚨🚨🚨
->
-> Phase 9 gates 9d.1, 9d.2, 9d.3 are **the only thing standing between a false-green run and a real one**. Each `python3 - <<'EOF' ... EOF` block below is a **bash command you MUST execute** with the Bash tool — not pseudocode, not "would-run", not "the orchestrator should". You ARE the orchestrator. Run them.
->
-> If your final return JSON has `status: completed` but Phase 9 bash logs are absent from your message history, you produced a **lie**. Re-run Phase 9 from Step 9.d.1.1 before returning.
-
-**Execute via Bash. Do not skip. Do not summarize.** Capture stdout into `gate_9d1_violations`.
-
-### Step 9.d.1.1 — Run regex check
-```bash
-python3 - <<'EOF'
-import json, re, sys
-PATTERN = re.compile(r"^tests/(unit|api|ui|security|a11y|contract)/(?:[^/]+/)+(test_[^/]+\.py|[^/]+\.(spec|test|api\.test|security\.test|contract\.test|a11y\.spec)\.(ts|js))$")
-data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
-violations = []
-for cat, cov in data.get("coverage_by_category", {}).items():
-    for p in cov.get("files", []):
-        rel = p.replace("${PROJECT_ROOT}/", "")
-        if not PATTERN.match(rel):
-            violations.append({"category": cat, "path": rel, "reason": "regex_mismatch"})
-print(json.dumps(violations))
-EOF
-```
-
-### Step 9.d.1.2 — Min file count + folder mismatch (uses `expected_files.json` from Phase 2.5)
-
-Uses the deterministic plan written by Phase 2.5 — no need to re-derive routes/pages logic.
+After the Phase 4 `expected_files`-only sub-agent contract landed, the legacy gates 9b/9c/9d.1.x/9d.3 became impossible to fail (path planning is deterministic; coverage is computed from agent_outputs, not disk-scan). They were removed. Phase 9 is now a single Python call:
 
 ```bash
-python3 - <<'EOF'
-import json, re
-data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
-expected = json.loads(open("${LOGS_DIR}/expected_files.json").read())
-
-mega = []
-mismatches = []
-for cat, exp_entries in expected.items():
-    cov = data.get("coverage_by_category", {}).get(cat, {})
-    if cov.get("status") not in ("passed","partial"): continue
-    files = cov.get("files", [])
-    expected_min = max(1, len(exp_entries))
-    if len(files) < expected_min:
-        mega.append({"category": cat, "actual": len(files), "expected_min": expected_min})
-
-    # Allowed (folder, stem) = pairs derived from expected_files paths
-    # plus (folder, folder) to permit per-domain index files.
-    allowed = set()
-    for e in exp_entries:
-        m = re.match(rf"^tests/{cat}/([^/]+)/(?:test_)?([^_/.]+)", e["path"])
-        if m:
-            allowed.add((m.group(1), m.group(2)))
-            allowed.add((m.group(1), m.group(1)))
-
-    for p in files:
-        m = re.match(rf"^tests/{cat}/([^/]+)/test_([^_/]+)(?:_[^/]+)?\.py$", p)
-        if not m: continue
-        folder, stem = m.group(1), m.group(2)
-        if (folder, stem) not in allowed:
-            mismatches.append({"category": cat, "path": p, "folder": folder, "stem": stem})
-
-print(json.dumps({"mega": mega, "domain_folder_mismatches": mismatches}))
-EOF
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/final_gate.py" \
+  --report-data "${PROJECT_ROOT}/test-reports/report-data.json" \
+  --project-root "${PROJECT_ROOT}" \
+  --run-id "${RUN_ID}"
 ```
 
-### Step 9.d.1.3 — Exact match against `expected_files` (BLOCKING)
+The script (`skills/_shared/qa_skills/final_gate.py`) runs three real checks and returns `{status, warnings}`:
 
-Cross-check every `coverage_by_category[*].files` entry against the `expected_files.json` written in Phase 2.5. Any extras or missing → violations. Extras are then **deleted from disk** to clean up sub-agent rework artifacts.
+| ID  | Check                                                                                   |
+|-----|-----------------------------------------------------------------------------------------|
+| 9a  | The four contract artifacts exist on disk (`test-state.json`, `report-data.json`, `report-*.html`, `.qa-skills/checkpoints/run.json`). |
+| 9d.2 | UI/a11y proof-of-run: when their status is passed/partial, `test_results_dir` exists AND ≥1 PNG screenshot present. |
+| 9e  | Learnings audit log: when `learnings_summary` claims activity, `log_path` must exist; `learnings.json` must parse with `version: "1.0"`. |
 
-```bash
-python3 - <<'EOF'
-import json, os, sys
-data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
-expected = json.loads(open("${LOGS_DIR}/expected_files.json").read())   # {cat: [{path, covers}, ...]}
+**Exit handling:**
+- `status: completed` (no warnings) → mark checkpoint `completed: true`, return `final_status = "completed"`.
+- `status: partial` (warnings) → append warnings to run summary, return `final_status = "partial"`. Never abort the run on warnings.
 
-# Allowlist: paths that are bootstrap / framework-required and exempt from exact-match.
-ALLOWLIST = {
-    "ui": {"tests/ui/test_smoke.py", "tests/ui/e2e/smoke.spec.ts"},
-    "a11y": set(),
-    "api": set(), "contract": set(), "security": set(), "unit": set(),
-}
+**What we removed and why:**
+- **9b** (per-category truthfulness) — coverage is now built from `all_test_outputs` via `qa_skills.coverage`, so the report cannot list files an agent did not produce.
+- **9c** (tests_new sum sanity) — local arithmetic with no opportunity for drift.
+- **9d.1.1** (path regex) — sub-agents validate before Write; orchestrator's `qa_skills.path_planner` produces only valid paths.
+- **9d.1.2** (mega-file / folder-mismatch detection) — impossible without the legacy fallback we just deleted from sub-agents.
+- **9d.1.3** (extras delete) — sub-agents now reject contract-less dispatch (`status: error, reason: missing_path_contract`) instead of silently improvising. No rework, no extras to clean.
+- **9d.3** (`jsonschema`-based report-data validation) — moved into `qa_skills.coverage` pre-write (validation happens before disk hits, not after).
 
-violations = []
-deletions  = []
-for cat, cov in data.get("coverage_by_category", {}).items():
-    if cov.get("status") not in ("passed","partial"): continue
-    if cat not in expected: continue   # category was skipped — nothing to enforce
-
-    expected_set = {e["path"] for e in expected[cat]}
-    actual_set   = set(cov.get("files", []))
-    allow        = ALLOWLIST.get(cat, set())
-
-    extras  = (actual_set - expected_set) - allow
-    missing = expected_set - actual_set
-
-    for p in sorted(extras):
-        violations.append({"category": cat, "kind": "extra_file",   "path": p})
-        # delete from disk — these are stale rework leftovers
-        full = os.path.join("${PROJECT_ROOT}", p)
-        if os.path.isfile(full):
-            os.remove(full)
-            deletions.append(p)
-    for p in sorted(missing):
-        violations.append({"category": cat, "kind": "missing_file", "path": p})
-
-print(json.dumps({"violations": violations, "deleted": deletions}))
-EOF
-```
-
-After deletion: also remove the now-stale entries from `coverage_by_category[cat].files` and decrement `tests_new` for that category by the matching `tests_written` reported by the sub-agent's `outputs[i]`. Re-write `report-data.json`.
-
-### Step 9.d.1.4 — Aggregate
-
-If Step 9.d.1.1 OR `mega` OR `domain_folder_mismatches` OR Step 9.d.1.3 produced any entries → set `final_status = "partial"`, append:
-- `warnings.append(f"path_violation: {p}")` per entry from 9.d.1.1
-- `warnings.append(f"mega_file_consolidation: {cat} actual={n} expected_min={m}")` per `mega`
-- `warnings.append(f"domain_folder_mismatch: {p} (folder={folder}, stem={stem})")` per `mismatches`
-- `warnings.append(f"path_violation_extra_file: {cat}:{p} (deleted)")` per `extras` from 9.d.1.3
-- `warnings.append(f"path_violation_missing_file: {cat}:{p}")` per `missing` from 9.d.1.3
-
-Surface all to user in final summary so they see exactly which files violate which rule.
-
-> **Why deletions happen here, not on first detection by sub-agent**:
-> Sub-agents are forbidden from deleting their own files (could mask bugs). Orchestrator owns final disk state. If sub-agent self-reworks (e.g., generates mega first, then per-tag), both copies remain on disk; 9.d.1.3 garbage-collects the extras post-hoc. The proper fix — ensuring no rework happens — lives in the `policy: "exact"` contract on first dispatch (Phase 3). 9.d.1.3 is the safety net.
-
-## 9d.2 — UI/A11y artifacts existence (REQUIRED — execute via Bash)
-
-### Step 9.d.2.1 — UI artifacts (only if `ui` category status ∈ {passed, partial})
-```bash
-python3 - <<'EOF'
-import json, os, glob
-data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
-ui_cov = data.get("coverage_by_category", {}).get("ui", {})
-if ui_cov.get("status") not in ("passed","partial"):
-    print('{"skipped": "ui not run"}'); exit(0)
-
-ui = data.get("ui_artifacts") or {}
-missing = []
-if not ui.get("test_results_dir") or not os.path.isdir(ui["test_results_dir"]):
-    missing.append("ui_test_results_dir_missing")
-if not ui.get("playwright_report") or not os.path.isfile(ui["playwright_report"]):
-    missing.append("ui_playwright_report_missing")
-# proof-of-run: with --screenshot=on, every test produces ≥1 PNG.
-png_count = len(glob.glob(os.path.join(ui.get("test_results_dir") or "/dev/null", "**", "*.png"), recursive=True))
-if png_count == 0:
-    missing.append("ui_no_screenshots_captured")
-print(json.dumps(missing))
-EOF
-```
-
-### Step 9.d.2.2 — A11y artifacts (only if `a11y` category status ∈ {passed, partial})
-```bash
-python3 - <<'EOF'
-import json, os, glob
-data = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
-a11y_cov = data.get("coverage_by_category", {}).get("a11y", {})
-if a11y_cov.get("status") not in ("passed","partial"):
-    print('{"skipped": "a11y not run"}'); exit(0)
-
-a = data.get("a11y_artifacts") or {}
-missing = []
-if not a.get("test_results_dir") or not os.path.isdir(a["test_results_dir"]):
-    missing.append("a11y_test_results_dir_missing")
-if not a.get("axe_report") or not os.path.isfile(a["axe_report"]):
-    missing.append("a11y_axe_report_missing")
-png_count = len(glob.glob(os.path.join(a.get("test_results_dir") or "/dev/null", "**", "*.png"), recursive=True))
-if png_count == 0:
-    missing.append("a11y_no_screenshots_captured")
-print(json.dumps(missing))
-EOF
-```
-
-### Step 9.d.2.3 — Aggregate
-
-Any non-empty `missing` list from either step → `final_status = "partial"`, append each item to `warnings`. **Zero-PNG = HARD failure** — without proof-of-run via `--screenshot=on` artifacts, the agent's pass status is unverifiable.
-
-## 9d.3 — report-data.json schema validation (REQUIRED — execute via Bash)
-
-### Step 9.d.3.1 — Run validator
-```bash
-python3 - <<'EOF'
-import json, sys
-try:
-    import jsonschema
-except ImportError:
-    print("WARN jsonschema not installed, skipping validation", file=sys.stderr); sys.exit(0)
-schema = json.loads(open("${CLAUDE_PLUGIN_ROOT}/skills/_shared/schemas/report_data.schema.json").read())
-data   = json.loads(open("${PROJECT_ROOT}/test-reports/report-data.json").read())
-try:
-    jsonschema.validate(data, schema)
-    print("OK")
-except jsonschema.ValidationError as e:
-    print(f"FAIL: {e.message} at path {list(e.path)}", file=sys.stderr); sys.exit(1)
-EOF
-```
-
-### Step 9.d.3.2 — Aggregate
-
-- exit 0 + stdout `OK` → continue.
-- exit 0 + stderr `WARN jsonschema not installed` → append `warnings: ["schema_validation_skipped: jsonschema_missing"]`.
-- exit 1 → append `warnings: ["report_data_schema_violation: <stderr>"]`, `final_status = "partial"`.
-
-Do NOT silently pass when validation fails. The user MUST see the schema breach in the final summary.
-
-## 9e. Learnings audit-log sanity
-
-Verify coverage-reporter's Phase 5.5 actually wrote what it claimed. Read the agent's `learnings_summary` from its return value (added in Phase 8):
-
-```python
-ls = coverage_reporter_return.get("learnings_summary", {})
-log_path = ls.get("log_path")
-
-# Sanity 1: log file exists when summary claims activity
-if (ls.get("added_this_run", 0) + ls.get("incremented_this_run", 0) + ls.get("rejected_this_run", 0)) > 0:
-    assert log_path and Path(log_path).exists(), "learnings_summary claims activity but log missing"
-
-# Sanity 2: tail count matches
-expected_lines = ls["added_this_run"] + ls["incremented_this_run"] + ls.get("promoted_this_run", 0) + ls["rejected_this_run"]
-actual_recent  = count_lines_with_run_id(log_path, run_id)
-if abs(actual_recent - expected_lines) > 0:
-    warnings.append(f"learnings_log_drift: expected {expected_lines}, found {actual_recent}")
-
-# Sanity 3: learnings.json parseable when log non-empty
-if log_path and Path(log_path).exists():
-    lj = Path(project_root) / ".qa-skills" / "learnings.json"
-    if lj.exists():
-        try:
-            data = json.loads(lj.read_text())
-            assert data.get("version") == "1.0"
-        except Exception as e:
-            warnings.append(f"learnings_json_corrupt: {e}")
-```
-
-Drift / corruption → `warnings`, not abort. Learnings is advisory; never block a run on memory issues.
-
-Mark checkpoint `completed: true` only after 9a–9d.3 pass clean. Otherwise `partial`. (9e adds warnings only.)
+If any of those failures somehow re-emerge, the bug is upstream (path_planner, coverage builder, or sub-agent contract enforcement) and needs a fix there — not a Phase 9 patch. **Phase 9 is no longer a rework safety-net.**
 
 # Final summary (printed to caller)
 

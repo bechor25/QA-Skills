@@ -78,8 +78,6 @@ Entries missing `test_path` or where the test file does not exist on disk are dr
 |----------|---------|
 | TS/JS    | `cd ${project_root} && npx jest --json --outputFile=.qa-skills/flaky-{i}.json 2>&1` |
 | Python   | `cd ${project_root} && pytest --tb=no -q --json-report --json-report-file=.qa-skills/flaky-{i}.json 2>&1` |
-| Java     | `cd ${project_root} && mvn test -q 2>&1` |
-| C#       | `cd ${project_root} && dotnet test 2>&1` |
 
 # Phase 2 — Aggregate per test
 

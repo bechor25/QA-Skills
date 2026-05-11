@@ -24,7 +24,46 @@
       }
     },
     "vulnerabilities_found": { "type": "array", "default": [] },
-    "coverage_by_category": { "type": "object" },
+    "coverage_by_category": {
+      "type": "object",
+      "description": "Per-category coverage. Each value uses real-units math from qa_skills.coverage: pct = |covered ∩ universe| / |universe|.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Closed enum: passed | partial | error | skipped:<reason>.",
+            "pattern": "^(passed|partial|error|skipped:[a-z0-9_:]+)$"
+          },
+          "pct": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "total": { "type": "integer", "minimum": 0, "description": "Universe size for this category." },
+          "covered_items": {
+            "type": "array",
+            "default": [],
+            "items": { "type": "string" },
+            "description": "Real-units actually covered by agent outputs. Subset of universe."
+          },
+          "missing_items": {
+            "type": "array",
+            "default": [],
+            "items": { "type": "string" },
+            "description": "Universe items NOT covered. Surfaced in HTML report as actionable gaps."
+          },
+          "files": {
+            "type": "array",
+            "default": [],
+            "items": { "type": "string" },
+            "description": "Test file paths produced by the source agent. Subset of agent_output.outputs[].path."
+          },
+          "tests": { "type": "integer", "minimum": 0 },
+          "tests_new": { "type": "integer", "minimum": 0 },
+          "tokens": { "type": "integer", "minimum": 0 },
+          "reason": { "type": ["string", "null"] },
+          "action": { "type": ["string", "null"] },
+          "critical_violations": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
     "modules": { "type": "array" },
     "gaps": { "type": "array", "default": [] },
     "blind_spots": { "type": "array", "default": [] },

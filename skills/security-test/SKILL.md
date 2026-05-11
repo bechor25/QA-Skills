@@ -23,7 +23,7 @@ Thin trigger skill. Delegates to `qa-skills:qa-security-test` agent.
 2. Resolve `project_root`.
 3. **Pre-step — env-validator:** invoke `qa-skills:qa-env-validator` with `{categories_enabled: ["security"], auto_install: true}`. Installs httpx/supertest if missing. Abort if `security` removed.
 4. Invoke `qa-skills:qa-code-analyzer` to get modules + routes + warnings.
-5. Detect API server URL.
+5. Build `server_plan` from `analysis.server_hint` via orchestrator's `build_server_plan(analysis, mode)` rule.
 6. Invoke `qa-skills:qa-security-test` agent with:
    ```json
    {
@@ -33,7 +33,10 @@ Thin trigger skill. Delegates to `qa-skills:qa-security-test` agent.
      "routes": [...],
      "warnings": [...],
      "locale": "he|en",
-     "preflight": {"server_check_url": "<detected>", "abort_if_no_server": true},
+     "preflight": {
+       "server_plan": { "url": "...", "start_command": "...", "start_allowed": false, "timeout_seconds": 30, "cleanup_pid": null },
+       "abort_if_no_server": true
+     },
      "budgets": {"max_tokens": 80000, "max_seconds": 600}
    }
    ```

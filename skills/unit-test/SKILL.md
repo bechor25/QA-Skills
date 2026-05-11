@@ -10,7 +10,7 @@ description: >
   Hebrew triggers (עברית): "כתוב בדיקות יחידה ל-[קובץ]", "בדוק את הפונקציה הזאת",
   "הוסף בדיקות יחידה ל-[מודול]", "שפר כיסוי בדיקות", "מצא מקרי קצה ב-[קובץ]".
 
-  Supports TypeScript/Jest/Vitest, Python/pytest, Java/JUnit 5, C#/NUnit.
+  Supports TypeScript/Jest/Vitest, Python/pytest.
 ---
 
 # unit-test (entry point)

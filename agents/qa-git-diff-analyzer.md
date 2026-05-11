@@ -80,16 +80,13 @@ Parse diff output. Apply heuristics by language:
 - Only `+` and `-` lines that contain comments only:
   - JS/TS: lines starting with `//` or in `/* */` blocks
   - Python: lines starting with `#` or inside docstrings
-  - Java/C#: lines starting with `//` or in `/* */`
 - Only whitespace/indentation changes.
 - Only string literal changes (e.g., logging messages).
 
 **Signature markers** (any of these in diff):
 - TS/JS: `function\s+\w+\s*\(` or `class\s+\w+` change.
 - Python: `def\s+\w+\s*\(` or `class\s+\w+` change.
-- Java: `public\s+.+\s+\w+\s*\(` change.
-- C#: `public\s+.+\s+\w+\s*\(` change.
-- Route decorators: `@app.route`, `@router.(get|post|...)`, `@(GetMapping|PostMapping|...)`, `[Http(Get|Post|...)]`.
+- Route decorators: `@app.route`, `@router.(get|post|...)`, `@(GetMapping|PostMapping|...)`.
 - Function/method parameter list changed (count or types).
 - Return type annotations changed.
 

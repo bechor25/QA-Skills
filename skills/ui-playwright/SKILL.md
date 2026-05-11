@@ -22,14 +22,15 @@ Thin trigger skill. Delegates to `qa-skills:qa-ui-test` agent.
 1. Detect locale (Hebrew chars → `he`, else `en`).
 2. Resolve `project_root`. Ask once if missing.
 3. **Pre-step — env-validator:** invoke `qa-skills:qa-env-validator` with `{categories_enabled: ["ui"], auto_install: true}`. This installs Playwright + browser if missing and surfaces `installs_performed[]`. If `ui` ends up in `categories_removed[]` → abort with the env-validator's reason (e.g., `unsupported_language`). qa-ui-test no longer installs anything itself — env-validator is the single source for installs.
-4. Detect dev server URL from `package.json` scripts (next dev → 3000, vite → 5173). Default `http://localhost:3000`.
-5. Invoke `qa-skills:qa-ui-test` agent with:
+4. Invoke `qa-skills:qa-code-analyzer` to obtain `analysis.server_hint` (deterministic detection of dev server command + port).
+5. Build `server_plan` via the orchestrator's `build_server_plan(analysis, mode)` rule (see `qa-orchestrator.md`). Standalone caller passes `start_allowed=false` by default; if user message contains "start the server" / "התחל שרת" → `start_allowed=true`.
+6. Invoke `qa-skills:qa-ui-test` agent with:
    ```json
    {
      "project_root": "...",
      "locale": "he|en",
      "preflight": {
-       "server_check_url": "<detected>",
+       "server_plan": { "url": "...", "start_command": "...", "start_allowed": false, "timeout_seconds": 30, "cleanup_pid": null },
        "abort_if_no_server": true,
        "smoke_first": true
      },

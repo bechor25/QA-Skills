@@ -17,12 +17,15 @@ Generate working security tests targeted at vulnerabilities indicated by code-an
 {
   "run_id": "uuid",
   "project_root": "/abs/path",
-  "language": "typescript|python|java|csharp",
+  "language": "typescript|javascript|python",
   "modules": [{"path": "...", "has_auth": true, "has_db_queries": true, "input_fields": [...]}],
   "routes": [...],
   "warnings": [/* code-analyzer warnings */],
   "locale": "he|en",
-  "preflight": {"server_check_url": "http://localhost:8000", "abort_if_no_server": true},
+  "preflight": {
+    "server_plan": {"url": "http://localhost:8000", "start_command": "uvicorn app.main:app", "start_allowed": false, "timeout_seconds": 30, "cleanup_pid": null},
+    "abort_if_no_server": true
+  },
   "budgets": {"max_tokens": 80000, "max_seconds": 600, "max_fix_iterations_per_file": 2},
   "priors": {
     "security": [
@@ -37,7 +40,7 @@ Generate working security tests targeted at vulnerabilities indicated by code-an
 ```json
 {
   "agent": "qa-security-test",
-  "status": "completed | partial | skipped_no_server | error",
+  "status": "completed | partial | skipped:no_server | error",
   "outputs": [
     {
       "source_module": "src/auth/login.ts",
@@ -108,112 +111,96 @@ Behavior on priors:
 
 # Hard rules
 
-1. **Pre-flight required.** No server → `skipped_no_server`.
+1. **Pre-flight required.** No server → `skipped:no_server`.
 2. **Never weaken assertions to make tests pass.** A failing security test = real vuln. Document in `vulnerabilities_found`.
 3. Only generate tests for categories where signals exist (no generic test spam).
-4. Group by domain sub-dir + category: `${project_root}/tests/security/{domain}/{category}.security.test.*`. Domain = first path segment of the route the test exercises (after stripping `/api/` prefix), or `src/`/`app/` sub-dir of the module. Examples below.
+4. File layout comes from `path_contract.expected_files` only — see Phase 2.5 above.
 5. Max 2 fix iterations.
+6. **Self-validate before return.** Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/validate_test_output.py" --json "$RESULT"`. See `reference/agent-result-contract.md`.
 
-# Output paths (REQUIRED layout)
+# Boundary rules — what this agent owns vs. what other agents own
 
-Tests live under **`${project_root}/tests/security/`**. **Never under sub-packages** (e.g. `sample_app/tests/`). **Never flat.** **Never one mega `test_security.py`.**
+**This agent (qa-security-test) tests ONLY attack vectors and security-specific concerns:**
+- SQL/NoSQL injection payloads
+- Stored / reflected XSS payloads (only on fields actually rendered to users)
+- IDOR — user A accessing user B's resources
+- Privilege escalation — non-admin hitting admin routes
+- Mass assignment — `role: admin`, `is_verified: true` ignored
+- Path traversal — `../../../etc/passwd`
+- Sensitive data exposure — passwords/hashes in responses, stack traces
+- Timing attacks — login response time invariance
+- JWT confusion — `alg: none` rejected, public-key-as-secret rejected
+- Open redirect, SSRF, CSRF, HTTP method override
+- Info disclosure — error messages leak email existence, schema details
 
-```
-tests/security/{domain}/{category}.security.test.{ext}
+**This agent does NOT test (forbidden — these are other agents' jobs):**
+| Concern | Owner |
+|---|---|
+| `wrong password → 401` (basic functional) | `qa-api-test` |
+| `missing field → 422` (validation) | `qa-api-test` |
+| `content-type: application/json` (header) | `qa-contract-test` |
+| Response schema keys/types | `qa-contract-test` |
+| Pure logic edge cases (no HTTP) | `qa-unit-test` |
 
-POST /auth/login   + injection signal     → tests/security/auth/test_injection.py
-POST /auth/login   + auth signal          → tests/security/auth/test_auth.py
-POST /auth/login   + timing signal        → tests/security/auth/test_timing.py
-GET  /users/:id    + idor signal          → tests/security/users/test_idor.py
-POST /users        + mass_assignment      → tests/security/users/test_mass_assignment.py
-POST /payments/charge + xss               → tests/security/payments/test_xss.py
-GET  /admin/users  + privilege_escalation → tests/security/admin/test_privilege.py
-```
+**Forbidden test patterns:**
+- ❌ `test_wrong_password_returns_401` — functional, not security. **DO NOT INCLUDE.**
+- ❌ `test_empty_credentials_rejected` — validation. **DO NOT INCLUDE.**
+- ❌ `test_response_content_type` — contract. **DO NOT INCLUDE.**
+- ❌ `test_xss_payload_in_password_field` — passwords not rendered to users. Wrong target. Test XSS on fields that ARE displayed (name, comment, profile bio).
+- ❌ `test_brute_force_consistent_error` without an actual rate-limit assertion — testing consistency is meaningless without enforcement.
 
-ONE file per `{domain}/{category}` combo. Multiple categories on same domain → multiple files. Multiple routes within same `{domain}/{category}` → group into one file.
+**Required test patterns:**
+- ✓ Each test must answer: "what attack is this defending against, and what does the system do wrong if the test fails?"
+- ✓ If the test could equally pass on a vulnerable system → it's not a security test. Drop it.
+- ✓ Timing tests: threshold must be tight (`< 5x ratio`, not `< 50x`). Loose threshold = no signal.
 
-## Hard rule — domain comes from ROUTE PATH, not source file
+# Mandatory file header
 
-**WRONG:**
-```
-analysis.modules contains {file: "app/routes.py"} with 8 routes inside.
-Agent groups everything under tests/security/routes/test_routes_security.py.   # mega-file by source name
-```
-
-**RIGHT:**
-```
-For each route + each active security category, derive (domain, category):
-  /api/login   + injection      → tests/security/auth/test_injection.py
-  /api/login   + auth           → tests/security/auth/test_auth.py
-  /api/login   + timing         → tests/security/auth/test_timing.py
-  /api/users   + idor           → tests/security/users/test_idor.py
-  /api/users   + mass_assign    → tests/security/users/test_mass_assignment.py
-  /api/calc/quote + injection   → tests/security/calc/test_injection.py
-  /api/admin/* + privilege      → tests/security/admin/test_privilege.py
-```
-
-Domain derivation function:
+Python:
 ```python
-def derive_domain_and_category(route_path: str, sec_category: str) -> tuple[str, str]:
-    p = route_path.lstrip("/")
-    if p.startswith("api/"): p = p[4:]
-    parts = [seg for seg in p.split("/") if seg and not seg.startswith("{")]
-    auth_topics = {"login","register","logout","refresh","me","reset","verify","forgot","signup","signin"}
-    domain = "auth" if (parts and parts[0] in auth_topics) else (parts[0] if parts else "root")
-    return (domain, sec_category)   # category = "injection","xss","idor","auth","timing","mass_assignment", etc.
+"""
+Security tests: <METHOD> <route_path>
+
+Generated by: qa-security-test (run_id: ${run_id})
+Attacks covered: <list e.g. sql_injection, timing, info_disclosure, jwt_alg_none>
+NOT tested here (covered by other agents):
+  - functional 401/422       → tests/api/<domain>/test_<tag>.py
+  - response schema shape    → tests/contract/<domain>/test_<tag>.py
+"""
 ```
 
-## Minimum file count enforcement
+TS/JS: same wrapped in `/** ... */`.
 
-Count `unique (domain, category)` pairs across all routes × all activated categories. That is the **minimum** number of files.
+Failing test in this file = real vulnerability. Document in `vulnerabilities_found[]`. Do NOT relax assertions to make it pass.
 
-Writing fewer = orchestrator Phase 9d.1 rejects with `path_violation: mega_file_consolidation`.
+# Output paths (single source: `path_contract.expected_files`)
 
-## Forbidden patterns
-
-```
-tests/test_security.py                            # flat, mega-file
-tests/security/test_all.py                        # mega-file under correct root
-tests/security/routes/test_routes_security.py     # source-file domain — WRONG
-sample_app/tests/test_security.py                 # wrong root
-tests/security/users/test_admin_security.py       # /admin lives under ADMIN, not USERS
-```
-
-## Hard rule — folder = route first-segment, ONE-TO-ONE
-
-Each unique first-segment of route.path = own top-level folder under `tests/security/`. Never group `/users` tests inside `/admin` folder. Orchestrator Phase 9d.1.2 flags as `domain_folder_mismatch`.
-
-## Path enforcement (BEFORE writing each file)
-
-Every path MUST regex-match: `^tests/security/(?:[^/]+/)+(test_[^/]+\.py|[^/]+\.(security\.test|test)\.(ts|js))$` (TS/JS uses `.security.test.ts` or `.test.ts`; Python uses `test_<name>.py`). Validate before Write. If `path_contract.required_pattern` provided in input, use that.
-
-## ⚠️⚠️⚠️ HIGHEST PRIORITY — `path_contract.expected_files` is an immutable contract
-
-> **If `path_contract.expected_files` is non-empty in your input, IT OVERRIDES every other rule about file structure in this MD.**
->
-> Produce **EXACTLY** the listed files. Same paths byte-for-byte. Each `expected_files[i].path` → one Write call. Each `expected_files[i].covers[]` lists the routes that file must cover.
->
-> Suppress training instinct that says "test file mirrors source module" (e.g. `app/auth.py` → `test_auth.py`). The orchestrator decided structure for you in Phase 2.5. Your job: fill files with security test code.
->
-> `policy == "exact"`: extras AND omissions both fail. Generate every listed path. Generate no path not listed.
-> If `expected_files` empty/missing: legacy `derive_domain_and_category()` flow above.
-
-### How to consume
+Read `${CLAUDE_PLUGIN_ROOT}/reference/path-contract.md` once. That document is the only authority on test-file layout.
 
 ```python
 expected = path_contract.get("expected_files") or []
 policy   = path_contract.get("policy", "exact")
-if expected and policy == "exact":
-    for entry in expected:
-        target_routes = [r for r in routes if f"{r['method']} {r['path']}" in entry["covers"]]
-        write_security_tests(entry["path"], target_routes)   # bundle ALL applicable security categories into one file
-    # done.
-else:
-    # legacy flow
-    ...
+
+if not expected:
+    return {"agent": "qa-security-test", "status": "error", "reason": "missing_path_contract", "outputs": []}
+if policy != "exact":
+    return {"agent": "qa-security-test", "status": "error", "reason": f"unsupported_policy:{policy}", "outputs": []}
+
+for entry in expected:
+    # entry = {"path": "tests/security/auth/test_login_security.py", "covers": ["POST /api/login"]}
+    target_routes = [r for r in routes if f"{r['method']} {r['path']}" in entry["covers"]]
+    if not target_routes:
+        return {"agent": "qa-security-test", "status": "error",
+                "reason": f"target_not_found:{entry['covers']}", "outputs": []}
+    # Bundle ALL applicable security categories (injection / auth / xss / idor / timing / mass-assignment / ...) into this ONE file.
+    write_security_tests(entry["path"], target_routes)
+# DONE. Generate nothing else.
 ```
 
-Note: under `expected_files` policy, all security categories applicable to a route bundle into the **single** test file the orchestrator listed (e.g. one `test_login.py` covers injection + auth + timing). Do not split further — that produced the structure the orchestrator already finalized.
+**Hard rules**:
+- ONE write per `expected_files[i].path`. The orchestrator already collapsed all security categories applicable to a route into one file — do not re-split.
+- Do NOT call `derive_domain_and_category()` or any path-derivation logic. That logic lives only in `qa_skills.path_planner`.
+- Validate every emitted path against `path_contract.required_pattern` before Write. Mismatch → `path_regex_violation:<path>` and skip that file.
 
 # Phase 1 — Pre-flight
 
@@ -288,7 +275,7 @@ Max 2 fix iterations.
 
 | Situation | Action |
 |-----------|--------|
-| Server down | `skipped_no_server` |
+| Server down | `skipped:no_server` |
 | Test bug after 2 iterations | Mark `partial`, document |
 | Real vuln detected | Mark `partial`, populate `vulnerabilities_found` |
 | Token budget exceeded | Finish current file, return partial |

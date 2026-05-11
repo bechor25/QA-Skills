@@ -54,7 +54,7 @@ See [AGENT.md](AGENT.md) for full design and rationale.
 
 ## Supported languages
 
-TypeScript / JavaScript · Python · Java · C# / .NET
+TypeScript / JavaScript · Python
 
 ## Components
 

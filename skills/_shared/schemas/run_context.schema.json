@@ -7,7 +7,7 @@
   "properties": {
     "run_id": { "type": "string" },
     "project_root": { "type": "string" },
-    "language": { "type": "string", "enum": ["typescript", "javascript", "python", "java", "kotlin", "csharp", "multi"] },
+    "language": { "type": "string", "enum": ["typescript", "javascript", "python", "multi"] },
     "additional_languages": { "type": "array", "items": { "type": "string" }, "default": [] },
     "user_locale": { "type": "string", "enum": ["he", "en"], "default": "en" },
     "categories_enabled": {

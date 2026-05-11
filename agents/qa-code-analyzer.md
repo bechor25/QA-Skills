@@ -65,8 +65,8 @@ Detect language by file presence:
 |--------|----------|
 | `package.json` | TypeScript/JavaScript |
 | `requirements.txt` / `pyproject.toml` | Python |
-| `pom.xml` / `build.gradle` | Java/Kotlin |
-| `*.csproj` / `*.sln` | C#/.NET |
+
+Other languages (Java, Kotlin, C#, etc.) → return `status: error`, `reason: "unsupported_language"`. v1 supports TS/JS + Python only.
 
 # Phase 2 — Per-file analysis
 
@@ -96,32 +96,56 @@ input_fields: /request\.form|request\.json|request\.data|@validator/
 http_calls:   /requests\.(get|post)|httpx\.|aiohttp\./
 ```
 
-**Java/Kotlin:**
-```
-exports:      /public\s+(static\s+)?\w+\s+(\w+)\s*\(/, /public\s+class\s+(\w+)/
-routes:       /@(GetMapping|PostMapping|PutMapping|DeleteMapping|RequestMapping)\(['"]([^'"]+)['"]\)/
-db_queries:   /\.find\(|\.save\(|\.query\(|EntityManager|JdbcTemplate/
-auth:         /@PreAuthorize|@Secured|JwtFilter|BCryptPasswordEncoder/i
-input_fields: /@RequestBody|@RequestParam|@PathVariable/
-```
-
-**C#/.NET:**
-```
-exports:      /public\s+(async\s+)?\w+\s+(\w+)\s*\(/, /public\s+class\s+(\w+)/
-routes:       /\[Http(Get|Post|Put|Delete|Patch)\("?([^"]*)"?\)\]/, /\[Route\("([^"]+)"\)\]/
-db_queries:   /\.Find\(|\.Where\(|\.SaveChanges|_context\.|dbContext\./
-auth:         /\[Authorize\]|JwtBearer|BCrypt|ClaimsPrincipal/i
-input_fields: /\[FromBody\]|\[FromQuery\]|IFormFile/
-```
-
 # Phase 3 — Extended detections
 
 - **External integrations:** stripe, twilio, sendgrid, aws, slack, telegram. Output `external_integrations: [{vendor, sdk, file}]`.
-- **File uploads:** multer, FormData, IFormFile, Flask `request.files`. Output `uploads: [{route, file}]`.
+- **File uploads:** multer, FormData, Flask `request.files`. Output `uploads: [{route, file}]`.
 - **GraphQL:** `*.graphql` files + Apollo/Strawberry resolvers. Output `graphql: {schema_path, resolvers: []}`.
 - **State machines:** enum + switch statements. Output `state_machines: [{name, states, file}]`.
 - **Frontend dev server detection:** read `package.json` scripts; detect `vite` (port 5173), `next` (3000), `webpack-dev-server` (8080). Set `frontend_dev_server` field.
-- **Backend dev server detection:** detect uvicorn, gunicorn, spring-boot, dotnet run from scripts/configs. Set `backend_dev_server`.
+- **Backend dev server detection:** detect uvicorn, gunicorn, hypercorn from scripts/configs. Set `backend_dev_server`.
+
+## Route classification (REQUIRED — every route MUST have `kind` + `produces`)
+
+For each route, populate `kind`, `produces`, `source`:
+
+| Signal | kind | produces | source |
+|--------|------|----------|--------|
+| FastAPI/Starlette `@app.{get,post,put,patch,delete}("/api/...")` | `api` | `json` | `fastapi` |
+| FastAPI route declaring `response_class=HTMLResponse` OR returning `templates.TemplateResponse` | `page` | `html` | `fastapi` |
+| Flask `@app.route("/x")` whose handler calls `render_template(...)` | `page` | `html` | `flask` |
+| Flask `@app.route("/x")` whose handler calls `jsonify(...)` or returns dict | `api` | `json` | `flask` |
+| Django URL whose view returns `HttpResponse(render(...))` | `page` | `html` | `django` |
+| Django URL whose view returns `JsonResponse` | `api` | `json` | `django` |
+| Express `app.{get,post,...}("/api/...", ...)` | `api` | `json` | `express` |
+| Next.js file under `pages/api/**/*.{ts,js}` | `api` | `json` | `next.pages.api` |
+| Next.js file under `pages/**/*.{tsx,jsx}` (not in `pages/api/`) | `page` | `html` | `next.pages` |
+| Next.js file under `app/**/route.{ts,js}` | `api` | `json` | `next.app.route` |
+| Static asset under `public/`, `static/` | `asset` | `unknown` | `static` |
+| Anything else | `unknown` | `unknown` | `null` |
+
+Determinism rule — when uncertain between api and page, inspect the FIRST RETURN STATEMENT of the handler. `return jsonify(...)` / `return JSONResponse(...)` / `return {...}` / `return [...]` → api. `return render_template(...)` / `return TemplateResponse(...)` / `return HttpResponse(rendered)` → page. Cannot determine after inspection → `unknown`.
+
+## Server hint (REQUIRED top-level `server_hint`)
+
+Emit a top-level `server_hint` block. Always present (`null` if nothing detectable).
+
+```json
+"server_hint": {
+  "backend_command":  "uvicorn app.main:app --reload",
+  "backend_port":     8000,
+  "frontend_command": "npm run dev",
+  "frontend_port":    5173,
+  "framework":        "fastapi"
+}
+```
+
+Detection rules:
+- **Node:** `package.json` → look at `scripts.dev` first, fallback `scripts.start`. Framework from `dependencies` (next/vite/nuxt/express/remix/astro). Port from script's flag (`--port 5173`) or framework default (next=3000, vite=5173, nuxt=3000, express=3000, remix=3000, astro=4321).
+- **Python (FastAPI):** if `fastapi` in `requirements.txt`/`pyproject.toml` → `backend_command: "uvicorn <module>:<app> --reload"` where `<module>:<app>` derived from project layout (e.g. `app.main:app` if `app/main.py` defines `app = FastAPI(...)`). Port: parse `if __name__ == "__main__":` block for `uvicorn.run(..., port=N)`, else 8000.
+- **Python (Flask):** if `flask` in deps → `backend_command: "flask --app <module> run"`. Port: 5000.
+- **Python (Django):** if `django` in deps → `backend_command: "python manage.py runserver"`. Port: 8000.
+- Cannot detect → set the entire `server_hint: null`. Downstream UI/a11y categories may be skipped.
 - **SSR/mixed coalescing:** when `frontend_kind ∈ {ssr, mixed}` AND `frontend_dev_server` is null/empty → set `frontend_dev_server = backend_dev_server`. SSR frontend lives on the same origin as the backend; the backend port serves the rendered HTML. Without this, downstream agents (qa-ui-test, qa-a11y-test) get a null URL and skip.
 - **Frontend kind detection:** classify into `spa | ssr | mixed | none`. Set `frontend_kind`.
 
@@ -159,6 +183,13 @@ Write full JSON to `${analysis_path}`. **The shape below is exact and exhaustive
   "frontend_dev_server": "http://localhost:3000",
   "backend_dev_server": "http://localhost:8000",
   "frontend_kind": "spa | ssr | mixed | none",
+  "server_hint": {
+    "backend_command": "uvicorn app.main:app --reload",
+    "backend_port": 8000,
+    "frontend_command": "npm run dev",
+    "frontend_port": 5173,
+    "framework": "fastapi"
+  },
   "modules": [
     {
       "path": "src/auth/login.ts",
@@ -172,7 +203,7 @@ Write full JSON to `${analysis_path}`. **The shape below is exact and exhaustive
       "input_fields": ["email", "password"]
     }
   ],
-  "routes": [{"method": "POST", "path": "/auth/login", "handler": "loginUser", "file": "src/routes/auth.ts", "requires_auth": false}],
+  "routes": [{"method": "POST", "path": "/api/login", "handler": "login", "file": "app/auth.py", "requires_auth": false, "kind": "api", "produces": "json", "source": "fastapi"}],
   "frontend_files": [{"path": "src/components/LoginForm.tsx", "hash": "...", "kind": "spa_component | ssr_template | static_html", "has_forms": true}],
   "stats": {"total_files": 42, "has_auth": true, "has_db": true, "has_api": true, "has_frontend": true, "total_modules": 28, "backend_modules": 22, "frontend_modules": 6},
   "external_integrations": [],
@@ -186,7 +217,8 @@ Write full JSON to `${analysis_path}`. **The shape below is exact and exhaustive
 ## Field-by-field rules
 
 - `modules` — ARRAY (not dict/object). Each element has exactly the 9 keys above. No `routes` per module. No `is_frontend` per module. Type field tells frontend vs backend (`type: "frontend"` for frontend modules; everything else is backend).
-- `routes` — ARRAY of `{method, path, handler, file, requires_auth}`. All 5 keys mandatory per element. `handler` = function name string. `file` = relative path. `requires_auth` = boolean (true if route has decorator/middleware indicating auth).
+- `routes` — ARRAY of `{method, path, handler, file, requires_auth, kind, produces, source}`. All 8 keys mandatory per element. `handler` = function name string. `file` = relative path of source file containing the handler (NOT to be confused with `modules[].path`). `requires_auth` = boolean (true if route has decorator/middleware indicating auth). `kind` ∈ `{api,page,asset,unknown}`. `produces` ∈ `{json,html,unknown}`. `source` = framework hint string or null.
+- `server_hint` — TOP-LEVEL OBJECT `{backend_command, backend_port, frontend_command, frontend_port, framework}` OR `null`. All five sub-fields nullable individually. Orchestrator builds `server_plan` from this — DO NOT decide whether the user can start the server, that is orchestrator's job.
 - `project_root` — single value, the absolute path the orchestrator passed in. Do NOT add `source_root` even if you detect a sub-package (e.g. `sample_app/`). The orchestrator has its own logic for that.
 - `warnings` — ARRAY of short string codes from the enum in Phase 4. Examples: `["unauthenticated_db_route", "async_handler_detected"]`. Never a free-form sentence.
 - `frontend_dev_server` / `backend_dev_server` — string URL or null. Never both null when `has_frontend: true`.

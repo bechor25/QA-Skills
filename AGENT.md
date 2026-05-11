@@ -2,6 +2,8 @@
 
 This project contains a set of QA skills + agents for Claude Code that automatically generate, run, and report on tests for any codebase. Designed for manual QA testers — no coding required.
 
+**Supported languages (v1):** TypeScript / JavaScript, Python.
+
 ## How to use / איך להשתמש
 
 Type any of the phrases below. Claude will ask for the project path and handle everything else automatically. The result is an HTML report that opens in your browser.
