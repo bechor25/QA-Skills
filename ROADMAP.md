@@ -230,9 +230,9 @@ qa-agent version
 
 - [x] 1.1 `scanners/filesystem.py` — walk project, classify files by language, detect ignored paths
 - [x] 1.2 `scanners/tech_stack.py` — detect frameworks (Express, FastAPI, Spring, Next.js, Django, NestJS, Flask, etc.) from manifests + signature files
-- [ ] 1.3 `parsers/python_ast.py` — extract symbols, routes, fixtures from Python files
-- [ ] 1.4 `parsers/tree_sitter_loader.py` — lazy load grammars for js/ts/python/java
-- [ ] 1.5 `parsers/ts_morph_bridge.py` — Node helper script (`qa_agent/parsers/_node/ts_morph_extract.js`) invoked via subprocess
+- [x] 1.3 `parsers/python_ast.py` — extract symbols, routes, fixtures from Python files
+- [x] 1.4 `parsers/tree_sitter_loader.py` — lazy load grammars for js/ts/python/java
+- [x] 1.5 `parsers/ts_morph_bridge.py` — Node helper script (`qa_agent/parsers/_node/ts_morph_extract.js`) invoked via subprocess
 - [ ] 1.6 `scanners/dependency.py` — parse `package.json`, `pyproject.toml`, `requirements*.txt`, `pom.xml`, `build.gradle*`
 - [ ] 1.7 `scanners/api_scanner.py` — derive route maps (Express routers, FastAPI routers, Spring `@RestController`, Next.js route handlers)
 - [ ] 1.8 `scanners/ui_scanner.py` — collect Next.js / Vite / CRA / Vue routes, detect Playwright targets
