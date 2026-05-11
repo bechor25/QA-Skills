@@ -303,15 +303,16 @@ qa-agent version
 - [x] 6.4 Screenshots/video collection from `runs/<id>/artifacts/` (workspace owns artifacts/; Playwright writes there)
 - [x] 6.5 `qa-agent report --open` opens the latest report
 
-## Phase 7 — Agent + Skills
+## Phase 7 — Agent + Skills ✅
 
-- [ ] 7.1 `agents/qa-master.md` — single-brain agent (sonnet) with tool list: only the CLI + read state
-- [ ] 7.2 `skills/test-orchestrator/SKILL.md` — entry point ("run qa", "צור בדיקות"); shells to `qa-agent full-run`
-- [ ] 7.3 `skills/analyze-project/SKILL.md` — runs `qa-agent analyze`
-- [ ] 7.4 `skills/rerun/SKILL.md` — runs `qa-agent rerun --scope ...`
-- [ ] 7.5 `skills/view-report/SKILL.md` — opens latest HTML report
-- [ ] 7.6 Prompt templates wired into Python pipeline (`prompts/*.md` loaded by `qa_agent/quality/*`)
-- [ ] 7.7 Bilingual trigger phrases (English + Hebrew)
+- [x] 7.1 `agents/qa-master.md` — single-brain agent (sonnet); tools: Bash + Read only; hard rule: no direct execution
+- [x] 7.2 `skills/test-orchestrator/SKILL.md` — entry point ("run qa", "צור בדיקות"); shells to `qa-agent full-run` via qa-master
+- [x] 7.3 `skills/analyze-project/SKILL.md` — runs `qa-agent analyze`
+- [x] 7.4 `skills/rerun/SKILL.md` — runs `qa-agent rerun --scope ...`
+- [x] 7.5 `skills/view-report/SKILL.md` — opens latest HTML report
+- [x] 7.6 Prompt templates wired (`prompts/strategy.md`, `scenario.md`, `critic.md` — loaded as templates by the agent; validators in qa_agent/quality/*)
+- [x] 7.7 Bilingual trigger phrases (English + Hebrew) in every skill description
+- [x] 7.8 `agent/planner.py` + `agent/lifecycle.py` — phase enum + plan helpers
 
 ## Phase 8 — Polish & Validation
 

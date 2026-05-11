@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "qa-skills",
-  "description": "Full QA test suite generator — unit, API, UI, and security tests for any codebase. Works in Hebrew and English.",
+  "description": "QA Operating System — autonomous scan, plan, generate, run, and report. Single agent orchestrates; a Python engine does the work. EN + HE triggers.",
   "owner": {
     "name": "Bechor Simhaev",
     "url": "https://github.com/bechor25"
@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "qa-skills",
-      "description": "Automatically generate, run, and report on a full test suite. Type one sentence in Hebrew or English — Claude handles everything and opens an HTML report.",
+      "description": "Type `run qa` (or `הרץ qa`) — Claude scans your project, plans by risk, generates tests, runs them, heals failures, and opens an HTML enterprise report.",
       "source": "./",
       "category": "testing"
     }
