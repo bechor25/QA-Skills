@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 
 from ...context.kg_builder import build_knowledge_graph
+from ...quality.risk_engine import build_risk_matrix
+from ...quality.strategy_builder import build_baseline_strategy
 from ...scanners.api_scanner import scan_api
 from ...scanners.dependency import build_dependency_graph
 from ...scanners.filesystem import scan_filesystem
@@ -44,5 +46,13 @@ def run(args: argparse.Namespace) -> int:
     kg = build_knowledge_graph(pm, dep, api, ui)
     sm.save(kg)
     log.info("analyze: knowledge_graph saved (%d modules, %d features)", len(kg.modules), len(kg.features))
+
+    risk = build_risk_matrix(project, kg)
+    sm.save(risk)
+    log.info("analyze: risk_matrix saved (%d entries)", len(risk.entries))
+
+    strategy = build_baseline_strategy(risk)
+    sm.save(strategy)
+    log.info("analyze: strategy saved (%d entries)", len(strategy.entries))
 
     return 0

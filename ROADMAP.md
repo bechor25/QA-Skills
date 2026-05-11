@@ -243,16 +243,16 @@ qa-agent version
 - [x] 1.13 Wire `qa-agent analyze` to run Phase 1 end-to-end and write all state files
 - [x] 1.14 Unit tests for scanners + KG builder against fixture repos (TS+Python)
 
-## Phase 2 — Intelligence (Risk + Strategy)
+## Phase 2 — Intelligence (Risk + Strategy) ✅
 
-- [ ] 2.1 `quality/risk_engine.py` — capability detection (auth, payments, mutation flows, permissions, data export, file upload)
-- [ ] 2.2 Risk scoring: business impact × state complexity × security exposure × change frequency (from git log)
-- [ ] 2.3 Write `state/risk_matrix.json` with per-capability score + rationale
-- [ ] 2.4 `quality/strategy_builder.py` — LLM-backed builder that emits planned test categories per capability
-- [ ] 2.5 Prompts: `prompts/strategy.md` with strict JSON schema
-- [ ] 2.6 Strategy validator: every entry references a real capability, totals within token cap
-- [ ] 2.7 Write `state/strategy.json`
-- [ ] 2.8 `quality/coverage_intelligence.py` — feature/risk coverage (not line coverage)
+- [x] 2.1 `quality/risk_engine.py` — capability detection (auth, payments, mutation flows, permissions, data export, file upload)
+- [x] 2.2 Risk scoring: business impact × state complexity × security exposure × change frequency (from git log)
+- [x] 2.3 Write `state/risk_matrix.json` with per-capability score + rationale
+- [x] 2.4 `quality/strategy_builder.py` — LLM-backed builder that emits planned test categories per capability
+- [x] 2.5 Prompts: `prompts/strategy.md` with strict JSON schema
+- [x] 2.6 Strategy validator: every entry references a real capability, totals within token cap
+- [x] 2.7 Write `state/strategy.json`
+- [x] 2.8 `quality/coverage_intelligence.py` — feature/risk coverage (not line coverage)
 
 ## Phase 3 — Test Generation
 
