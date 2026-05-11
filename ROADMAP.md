@@ -233,9 +233,9 @@ qa-agent version
 - [x] 1.3 `parsers/python_ast.py` — extract symbols, routes, fixtures from Python files
 - [x] 1.4 `parsers/tree_sitter_loader.py` — lazy load grammars for js/ts/python/java
 - [x] 1.5 `parsers/ts_morph_bridge.py` — Node helper script (`qa_agent/parsers/_node/ts_morph_extract.js`) invoked via subprocess
-- [ ] 1.6 `scanners/dependency.py` — parse `package.json`, `pyproject.toml`, `requirements*.txt`, `pom.xml`, `build.gradle*`
-- [ ] 1.7 `scanners/api_scanner.py` — derive route maps (Express routers, FastAPI routers, Spring `@RestController`, Next.js route handlers)
-- [ ] 1.8 `scanners/ui_scanner.py` — collect Next.js / Vite / CRA / Vue routes, detect Playwright targets
+- [x] 1.6 `scanners/dependency.py` — parse `package.json`, `pyproject.toml`, `requirements*.txt`, `pom.xml`, `build.gradle*`
+- [x] 1.7 `scanners/api_scanner.py` — derive route maps (Express routers, FastAPI routers, Spring `@RestController`, Next.js route handlers)
+- [x] 1.8 `scanners/ui_scanner.py` — collect Next.js / Vite / CRA / Vue routes, detect Playwright targets
 - [ ] 1.9 `context/kg_builder.py` — build hierarchical KG from scanner outputs
 - [ ] 1.10 `context/summarizer.py` — produce per-module + per-feature text summaries (no LLM)
 - [ ] 1.11 `context/chunking.py` — split summaries into prompt-safe slices
