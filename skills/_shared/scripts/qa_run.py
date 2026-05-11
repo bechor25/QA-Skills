@@ -68,6 +68,8 @@ from qa_skills.budget import (  # noqa: E402
     summarize_prior_batches,
 )
 from qa_skills.final_gate import run_final_gate  # noqa: E402
+from qa_skills.flaky import detect_flaky  # noqa: E402
+from qa_skills.html_render import write_html_report  # noqa: E402
 from qa_skills.learnings import persist_learnings  # noqa: E402
 from qa_skills.path_planner import compute_expected_files  # noqa: E402
 from qa_skills.prompt_builder import (  # noqa: E402
@@ -831,49 +833,47 @@ def _agent_summary(
 
 
 def phase_5_flaky(rc: dict, task_call: TaskCall) -> dict:
-    """Invoke qa-flaky-detector once for the full run.
+    """Detect flaky tests via the deterministic `qa_skills.flaky` module.
 
-    Skipped if every agent status is `error` / `skipped` (nothing useful to
-    re-run). Writes `flaky.json` on disk; degrades to empty list on failure.
+    No LLM involvement — running the test suite 3 times and diffing pass/fail
+    sets is pure Python. The old `qa-flaky-detector` agent was a thin shell
+    over `scripts/flaky.py`; we now call the underlying function directly.
+
+    `task_call` is accepted for signature symmetry with other phases but
+    unused here.
     """
+    del task_call  # signature-only; flaky detection is fully deterministic.
     logs_dir = Path(rc["logs_dir"])
+    flaky_path = logs_dir / "flaky.json"
+
     any_passable = False
-    test_paths: list[str] = []
     for agent_log in sorted(logs_dir.glob("agent_output_qa-*-test.json")):
         data = verify_on_disk(agent_log) or {}
         status = (data.get("status") or "error").split(":", 1)[0]
         if status in ("passed", "partial"):
             any_passable = True
-        for o in data.get("outputs", []) or []:
-            if isinstance(o, dict) and o.get("path") and o.get("status") == "passed":
-                test_paths.append(o["path"])
+            break
 
-    flaky_path = logs_dir / "flaky.json"
-    if not any_passable or not test_paths:
+    if not any_passable:
         atomic_write_json(flaky_path, {"flaky_tests": [], "runs_completed": 0,
                                        "skipped": "no_passable_tests"})
         phase_checkpoint(rc, phase=5, name="flaky")
         return {"flaky_count": 0, "skipped": True}
 
-    payload = {
-        "run_id":       rc["run_id"],
-        "project_root": rc["project_root"],
-        "logs_dir":     str(logs_dir),
-        "test_paths":   sorted(set(test_paths))[:50],
-        "flaky_path":   str(flaky_path),
-    }
     try:
-        task_call("qa-flaky-detector", payload)
-    except TaskError:
-        pass
+        result = detect_flaky(
+            project_root=rc["project_root"],
+            language=rc.get("language") or "typescript",
+            runs=3,
+            locale=rc.get("locale", "en"),
+        )
+    except Exception as e:  # pragma: no cover — flaky.py errors degrade gracefully
+        result = {"flaky_tests": [], "runs_completed": 0,
+                  "error": f"{type(e).__name__}:{e}"}
 
-    if not flaky_path.is_file():
-        atomic_write_json(flaky_path, {"flaky_tests": [], "runs_completed": 0,
-                                       "skipped": "agent_no_write"})
-
-    data = verify_on_disk(flaky_path) or {}
+    atomic_write_json(flaky_path, result)
     phase_checkpoint(rc, phase=5, name="flaky")
-    return {"flaky_count": len(data.get("flaky_tests") or [])}
+    return {"flaky_count": len(result.get("flaky_tests") or [])}
 
 
 # ---------------------------------------------------------------------------
@@ -1049,23 +1049,32 @@ def phase_7_quality(rc: dict) -> dict:
 
 
 def phase_8b_html(rc: dict, task_call: TaskCall) -> dict:
-    """Invoke qa-html-reporter against the freshly-built report-data.json."""
+    """Render report-*.html via the deterministic `qa_skills.html_render`.
+
+    No LLM involvement — HTML rendering is pure templating over a fixed
+    data shape. The old `qa-html-reporter` agent was a thin shell over
+    `scripts/html_render.py`; we call the underlying function directly.
+
+    `task_call` is accepted for signature symmetry but unused.
+    """
+    del task_call
     project_root = Path(rc["project_root"])
     report_data_path = project_root / "test-reports" / "report-data.json"
-    payload = {
-        "run_id":           rc["run_id"],
-        "project_root":     str(project_root),
-        "report_data_path": str(report_data_path),
-        "locale":           rc.get("locale", "en"),
-    }
-    try:
-        task_call("qa-html-reporter", payload)
-    except TaskError:
-        pass
+    data = verify_on_disk(report_data_path)
+    if not isinstance(data, dict):
+        return {"html_path": None, "error": "report_data_missing"}
 
-    reports_dir = project_root / "test-reports"
-    html_files = sorted(p for p in reports_dir.glob("report-*.html"))
-    html_path = str(html_files[-1]) if html_files else None
+    stamp = (rc.get("started_at") or now_iso()).replace(":", "").replace("-", "")[:14]
+    project_name = project_root.name
+    out_path = project_root / "test-reports" / f"report-{project_name}-{stamp}.html"
+
+    try:
+        write_html_report(data, out_path)
+        html_path: Optional[str] = str(out_path)
+    except Exception as e:  # pragma: no cover
+        html_path = None
+        rc.setdefault("warnings", []).append(f"html_render_failed:{type(e).__name__}:{e}")
+
     phase_checkpoint(rc, phase=8.5, name="html_report")
     return {"html_path": html_path}
 
@@ -1183,7 +1192,13 @@ def run(
     """
     args = parse_args(argv)
     cats = args.categories.split(",") if args.categories else None
-    tc = task_call or task_subprocess
+    if task_call is not None:
+        tc = task_call
+    else:
+        # Bind project_root into the default subprocess invocation so
+        # sub-agents have file-system access to the target project.
+        from functools import partial
+        tc = partial(task_subprocess, project_root=str(Path(args.project_root).resolve()))
 
     if not Path(args.project_root).exists():
         _fail(1, "project_root_missing", args.project_root)

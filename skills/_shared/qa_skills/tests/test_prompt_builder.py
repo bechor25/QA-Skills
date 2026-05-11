@@ -54,7 +54,9 @@ def test_build_test_gen_prompt_has_one_file():
 
 
 def test_build_test_gen_prompt_includes_reference_for_category():
-    for cat, expected in REFERENCE_BY_CATEGORY.items():
+    """reference_pattern must be an absolute path under plugin root, not the
+    relative `reference/<file>` literal — sub-agents have no PLUGIN_ROOT."""
+    for cat, rel in REFERENCE_BY_CATEGORY.items():
         p = build_test_gen_prompt(
             agent=f"qa-{cat}-test",
             category=cat,
@@ -64,7 +66,10 @@ def test_build_test_gen_prompt_includes_reference_for_category():
             project_root="/abs/path",
             run_id="r1",
         )
-        assert p["reference_pattern"] == expected
+        assert p["reference_pattern"].startswith("/"), p["reference_pattern"]
+        assert p["reference_pattern"].endswith(rel), (
+            f"expected suffix {rel}, got {p['reference_pattern']}"
+        )
 
 
 def test_build_test_gen_prompt_excludes_other_files_briefs():

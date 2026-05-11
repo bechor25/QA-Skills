@@ -16,6 +16,7 @@ Public surface:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Optional
 
 __all__ = [
@@ -53,6 +54,24 @@ REFERENCE_BY_CATEGORY = {
     "ui":       "reference/ui-test-patterns.md",
     "a11y":     "reference/a11y-test-patterns.md",
 }
+
+
+def _plugin_root() -> Path:
+    """Resolve plugin root from this module's location.
+
+    Layout: ${PLUGIN_ROOT}/skills/_shared/qa_skills/prompt_builder.py
+                         |        ↑           ↑     ↑
+                         |        parent      parent parent → here
+                         parent.parent.parent.parent = plugin root
+    """
+    return Path(__file__).resolve().parent.parent.parent.parent
+
+
+def _resolve_reference(rel_path: str) -> str:
+    """Convert `reference/<file>` to an absolute path under plugin root."""
+    if not rel_path:
+        return ""
+    return str(_plugin_root() / rel_path)
 
 
 class PromptTooLarge(ValueError):
@@ -133,7 +152,7 @@ def build_test_gen_prompt(
         "file_to_generate":  file_to_generate,
         "covers":            list(covers),
         "domain_brief":      brief_slice,
-        "reference_pattern": REFERENCE_BY_CATEGORY.get(category, ""),
+        "reference_pattern": _resolve_reference(REFERENCE_BY_CATEGORY.get(category, "")),
         "prior_summary":     prior,
     }
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import uuid
@@ -101,6 +102,59 @@ def atomic_write_json(path: Path, payload: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+_AGENT_RESPONSE_PREAMBLE_RE = re.compile(r"^[^{\[]*", re.DOTALL)
+
+
+def _extract_json_object(text: str) -> Optional[dict | list]:
+    """Pull the first balanced JSON object/array from `text`.
+
+    Sub-agents are instructed to return JSON only, but LLMs sometimes prefix
+    chatty text or wrap in code fences. This is a tolerant extractor.
+    Returns None on hard parse failure (caller raises TaskError).
+    """
+    s = text.strip()
+    if not s:
+        return None
+    # Strip ```json ... ``` / ``` ... ``` fences.
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s)
+        s = re.sub(r"\s*```$", "", s)
+    # Locate first { or [.
+    m = re.search(r"[{\[]", s)
+    if not m:
+        return None
+    start = m.start()
+    open_ch = s[start]
+    close_ch = "}" if open_ch == "{" else "]"
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            continue
+        if ch == open_ch:
+            depth += 1
+        elif ch == close_ch:
+            depth -= 1
+            if depth == 0:
+                blob = s[start : i + 1]
+                try:
+                    return json.loads(blob)
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
 def task_subprocess(
     agent: str,
     payload: dict,
@@ -108,27 +162,49 @@ def task_subprocess(
     timeout: int = 600,
     claude_bin: str = "claude",
     extra_env: Optional[dict] = None,
+    project_root: Optional[str] = None,
 ) -> dict:
     """Default runtime implementation of `TaskCall`.
 
-    Spawns the `claude` CLI in headless mode against the requested sub-agent,
-    feeds it the payload as JSON on stdin, expects a single JSON object on
-    stdout.
+    Spawns the `claude` CLI in headless mode against the requested sub-agent
+    (`--agent <agent>`), passes the JSON payload as the prompt on stdin in
+    text mode, and parses the assistant's `result` field as JSON.
+
+    CLI shape (claude-code v2.x):
+
+        claude --print \\
+               --agent <agent> \\
+               --output-format json \\
+               --permission-mode bypassPermissions \\
+               [--add-dir <project_root>]
+
+    The payload (a dict) is JSON-encoded and piped to stdin; the sub-agent
+    sees it as the user prompt.
 
     Tests should inject a stub instead — this function performs real IO.
 
     Raises:
         TaskTimeout: process exceeded `timeout` seconds.
-        TaskError:   non-zero exit, or stdout not valid JSON.
+        TaskError:   non-zero exit, missing/invalid JSON, or sub-agent
+                     response not parseable as JSON.
     """
-    payload_str = json.dumps(payload)
+    payload_str = json.dumps(payload, ensure_ascii=False)
     env = os.environ.copy()
     if extra_env:
         env.update(extra_env)
 
+    cmd = [
+        claude_bin, "--print",
+        "--agent", agent,
+        "--output-format", "json",
+        "--permission-mode", "bypassPermissions",
+    ]
+    if project_root:
+        cmd += ["--add-dir", project_root]
+
     try:
         proc = subprocess.run(
-            [claude_bin, "-p", agent, "--input-format", "json"],
+            cmd,
             input=payload_str,
             text=True,
             capture_output=True,
@@ -150,12 +226,39 @@ def task_subprocess(
     if not raw:
         raise TaskError(f"task {agent} produced empty stdout")
 
+    # --output-format json wraps the response in
+    # {"type":"result","result":"<assistant text>", ...}.
     try:
-        return json.loads(raw)
+        wrapper = json.loads(raw)
     except json.JSONDecodeError as e:
         raise TaskError(
-            f"task {agent} stdout not JSON: {e}; first 200 chars: {raw[:200]!r}"
+            f"task {agent} wrapper not JSON: {e}; first 200 chars: {raw[:200]!r}"
         ) from e
+
+    if not isinstance(wrapper, dict):
+        raise TaskError(
+            f"task {agent} wrapper not a dict: {type(wrapper).__name__}"
+        )
+    if wrapper.get("is_error") or wrapper.get("subtype") == "error":
+        raise TaskError(
+            f"task {agent} reported error: {wrapper.get('error') or wrapper.get('result', '')[:300]}"
+        )
+
+    result_text = wrapper.get("result")
+    if not isinstance(result_text, str):
+        # Some shapes may already nest a dict — accept directly.
+        if isinstance(result_text, dict):
+            return result_text
+        raise TaskError(
+            f"task {agent} missing 'result' string: keys={list(wrapper.keys())}"
+        )
+
+    extracted = _extract_json_object(result_text)
+    if not isinstance(extracted, dict):
+        raise TaskError(
+            f"task {agent} result not JSON object: first 200 chars: {result_text[:200]!r}"
+        )
+    return extracted
 
 
 # ---------------------------------------------------------------------------

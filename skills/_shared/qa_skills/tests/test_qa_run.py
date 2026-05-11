@@ -745,8 +745,14 @@ def test_phase_3_deletes_wrongly_named_file(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_phase_5_writes_flaky_json(tmp_path: Path):
+def test_phase_5_writes_flaky_json(tmp_path: Path, monkeypatch):
+    """Phase 5 calls qa_skills.flaky.detect_flaky directly (no LLM).
+    Monkeypatch the function so the test never actually spawns pytest."""
     project = _make_project(tmp_path)
+    monkeypatch.setattr(
+        "qa_run.detect_flaky",
+        lambda **kw: {"flaky_tests": [], "runs_completed": 3},
+    )
     result = qa_run.run(
         ["--project-root", str(project), "--run-id", "d1",
          "--categories", "unit"],
@@ -756,10 +762,15 @@ def test_phase_5_writes_flaky_json(tmp_path: Path):
     assert flaky.is_file()
     data = json.loads(flaky.read_text(encoding="utf-8"))
     assert "flaky_tests" in data
+    assert data.get("runs_completed") == 3
 
 
-def test_phase_5_skipped_when_no_passable(tmp_path: Path):
+def test_phase_5_skipped_when_no_passable(tmp_path: Path, monkeypatch):
     project = _make_project(tmp_path)
+    monkeypatch.setattr(
+        "qa_run.detect_flaky",
+        lambda **kw: {"flaky_tests": [], "runs_completed": 3},
+    )
     # All test-gen calls fail to write → all per-file outputs error → flaky skipped
     def never_writes(payload: dict) -> dict:
         return {"agent": payload["agent"], "status": "passed", "outputs": []}

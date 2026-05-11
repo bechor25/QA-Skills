@@ -76,20 +76,70 @@ def test_verify_on_disk_returns_none_on_directory(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_task_subprocess_parses_stdout_json():
-    fake_completed = subprocess.CompletedProcess(
-        args=["claude"], returncode=0, stdout='{"agent":"x","status":"ok"}', stderr=""
+def _wrap(result: str, is_error: bool = False) -> str:
+    """Mimic `claude --output-format json` wrapper shape."""
+    return json.dumps({
+        "type": "result",
+        "subtype": "error" if is_error else "success",
+        "is_error": is_error,
+        "result": result,
+        "session_id": "fake",
+    })
+
+
+def test_task_subprocess_parses_result_field_as_json():
+    fake = subprocess.CompletedProcess(
+        args=["claude"], returncode=0,
+        stdout=_wrap('{"agent":"x","status":"ok"}'), stderr="",
     )
-    with patch("qa_skills.driver.subprocess.run", return_value=fake_completed):
+    with patch("qa_skills.driver.subprocess.run", return_value=fake):
         out = task_subprocess("qa-unit-test", {"foo": "bar"})
     assert out == {"agent": "x", "status": "ok"}
 
 
-def test_task_subprocess_raises_on_nonzero_exit():
-    fake_completed = subprocess.CompletedProcess(
-        args=["claude"], returncode=1, stdout="", stderr="boom"
+def test_task_subprocess_strips_code_fences():
+    fenced = "```json\n{\"agent\":\"x\",\"status\":\"ok\"}\n```"
+    fake = subprocess.CompletedProcess(
+        args=["claude"], returncode=0, stdout=_wrap(fenced), stderr="",
     )
-    with patch("qa_skills.driver.subprocess.run", return_value=fake_completed):
+    with patch("qa_skills.driver.subprocess.run", return_value=fake):
+        out = task_subprocess("qa-unit-test", {})
+    assert out["agent"] == "x"
+
+
+def test_task_subprocess_skips_preamble_text():
+    chatty = "Sure! Here's the result:\n\n{\"agent\":\"x\",\"status\":\"ok\"}\n\nDone."
+    fake = subprocess.CompletedProcess(
+        args=["claude"], returncode=0, stdout=_wrap(chatty), stderr="",
+    )
+    with patch("qa_skills.driver.subprocess.run", return_value=fake):
+        out = task_subprocess("qa-unit-test", {})
+    assert out["status"] == "ok"
+
+
+def test_task_subprocess_invokes_correct_cli_args():
+    fake = subprocess.CompletedProcess(
+        args=["claude"], returncode=0,
+        stdout=_wrap('{"agent":"x","status":"ok"}'), stderr="",
+    )
+    with patch("qa_skills.driver.subprocess.run", return_value=fake) as mock_run:
+        task_subprocess("qa-unit-test", {"foo": "bar"}, project_root="/p")
+    args, kwargs = mock_run.call_args
+    cmd = args[0]
+    assert "--print" in cmd
+    assert "--agent" in cmd and cmd[cmd.index("--agent") + 1] == "qa-unit-test"
+    assert "--output-format" in cmd and "json" in cmd
+    assert "--permission-mode" in cmd and "bypassPermissions" in cmd
+    assert "--add-dir" in cmd and "/p" in cmd
+    # Payload goes through stdin.
+    assert json.loads(kwargs["input"]) == {"foo": "bar"}
+
+
+def test_task_subprocess_raises_on_nonzero_exit():
+    fake = subprocess.CompletedProcess(
+        args=["claude"], returncode=1, stdout="", stderr="boom",
+    )
+    with patch("qa_skills.driver.subprocess.run", return_value=fake):
         with pytest.raises(TaskError) as excinfo:
             task_subprocess("qa-unit-test", {})
     assert "exited 1" in str(excinfo.value)
@@ -104,14 +154,26 @@ def test_task_subprocess_raises_on_timeout():
             task_subprocess("qa-unit-test", {}, timeout=1)
 
 
-def test_task_subprocess_raises_on_unparseable_stdout():
-    fake_completed = subprocess.CompletedProcess(
-        args=["claude"], returncode=0, stdout="not json", stderr=""
+def test_task_subprocess_raises_on_wrapper_error_flag():
+    fake = subprocess.CompletedProcess(
+        args=["claude"], returncode=0,
+        stdout=_wrap("rate limited", is_error=True), stderr="",
     )
-    with patch("qa_skills.driver.subprocess.run", return_value=fake_completed):
+    with patch("qa_skills.driver.subprocess.run", return_value=fake):
         with pytest.raises(TaskError) as excinfo:
             task_subprocess("qa-unit-test", {})
-    assert "not JSON" in str(excinfo.value)
+    assert "reported error" in str(excinfo.value)
+
+
+def test_task_subprocess_raises_when_result_has_no_json():
+    fake = subprocess.CompletedProcess(
+        args=["claude"], returncode=0,
+        stdout=_wrap("just some prose, no json here"), stderr="",
+    )
+    with patch("qa_skills.driver.subprocess.run", return_value=fake):
+        with pytest.raises(TaskError) as excinfo:
+            task_subprocess("qa-unit-test", {})
+    assert "not JSON object" in str(excinfo.value)
 
 
 def test_task_subprocess_raises_on_missing_binary():
