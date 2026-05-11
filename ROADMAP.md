@@ -228,8 +228,8 @@ qa-agent version
 
 ## Phase 1 — Scanning & Context
 
-- [ ] 1.1 `scanners/filesystem.py` — walk project, classify files by language, detect ignored paths
-- [ ] 1.2 `scanners/tech_stack.py` — detect frameworks (Express, FastAPI, Spring, Next.js, Django, NestJS, Flask, etc.) from manifests + signature files
+- [x] 1.1 `scanners/filesystem.py` — walk project, classify files by language, detect ignored paths
+- [x] 1.2 `scanners/tech_stack.py` — detect frameworks (Express, FastAPI, Spring, Next.js, Django, NestJS, Flask, etc.) from manifests + signature files
 - [ ] 1.3 `parsers/python_ast.py` — extract symbols, routes, fixtures from Python files
 - [ ] 1.4 `parsers/tree_sitter_loader.py` — lazy load grammars for js/ts/python/java
 - [ ] 1.5 `parsers/ts_morph_bridge.py` — Node helper script (`qa_agent/parsers/_node/ts_morph_extract.js`) invoked via subprocess
