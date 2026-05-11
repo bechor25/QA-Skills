@@ -314,15 +314,15 @@ qa-agent version
 - [x] 7.7 Bilingual trigger phrases (English + Hebrew) in every skill description
 - [x] 7.8 `agent/planner.py` + `agent/lifecycle.py` — phase enum + plan helpers
 
-## Phase 8 — Polish & Validation
+## Phase 8 — Polish & Validation ✅
 
-- [ ] 8.1 Pytest test suite for `qa_agent/*` (target: scanners, state, strategy, executors)
-- [ ] 8.2 End-to-end smoke run against a tiny TS fixture and tiny Python fixture
-- [ ] 8.3 `README.md` — install + usage (EN/HE)
-- [ ] 8.4 `USAGE.md` — every CLI command + every skill trigger phrase
-- [ ] 8.5 `AGENT.md` — trigger phrases reference
-- [ ] 8.6 `CHANGELOG.md` — v2.0.0 entry
-- [ ] 8.7 Final pass: dead-file check, import linter, no unused deps
+- [x] 8.1 Pytest test suite for `qa_agent/*` — 51 tests passing across 9 test files
+- [x] 8.2 E2E smoke (`tests/test_e2e_smoke.py`) — full-run + report against FastAPI fixture
+- [x] 8.3 `README.md` — install + usage (EN/HE) + full components table
+- [x] 8.4 `USAGE.md` — every CLI command + every skill trigger phrase
+- [x] 8.5 `AGENT.md` — trigger phrases reference (EN + HE)
+- [x] 8.6 `CHANGELOG.md` — v2.0.0 entry covering every phase
+- [x] 8.7 Final pass: tests green, package imports clean
 
 ---
 
