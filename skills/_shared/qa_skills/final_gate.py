@@ -3,6 +3,10 @@
 The legacy 9b/9c/9d.1.x/9d.3 checks are gone because the upstream contract makes
 them impossible to fail (path_contract enforced at sub-agent input, coverage
 math built from agent_outputs). This module ships only the cheap, real checks.
+
+9f (added in Track A1) — stub-content detection: any file whose body matches
+`qa_skills.stub_markers.STUB_MARKERS` escalates status to `partial` and is
+listed in the warnings as `stub_content:<category>:<path>`.
 """
 
 from __future__ import annotations
@@ -11,6 +15,8 @@ import glob
 import json
 from pathlib import Path
 from typing import Any
+
+from .stub_markers import is_stub
 
 
 def _check_artifacts(project_root: Path, run_id: str) -> list[str]:
@@ -48,6 +54,37 @@ def _check_ui_proof(report_data: dict, project_root: Path) -> list[str]:
         png_count = len(glob.glob(str(Path(results_dir) / "**" / "*.png"), recursive=True))
         if png_count == 0:
             warnings.append(f"{category}_no_screenshots_captured")
+    return warnings
+
+
+def _check_stub_content(report_data: dict, project_root: Path) -> list[str]:
+    """9f — emitted test files must not contain stub markers.
+
+    Iterates `coverage_by_category[*].files[]` (when present) and reads each
+    referenced file. Any match against STUB_MARKERS surfaces as
+    `stub_content:<category>:<path>` warning. Cost is one read per emitted
+    test file (O(n)); fine at hundreds of files.
+    """
+    warnings: list[str] = []
+    cov = report_data.get("coverage_by_category", {}) or {}
+    for category, info in cov.items():
+        if not isinstance(info, dict):
+            continue
+        files = info.get("files") or []
+        if not isinstance(files, list):
+            continue
+        for fpath in files:
+            if not isinstance(fpath, str) or not fpath:
+                continue
+            full = project_root / fpath
+            if not full.is_file():
+                continue
+            try:
+                content = full.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if is_stub(content):
+                warnings.append(f"stub_content:{category}:{fpath}")
     return warnings
 
 
@@ -95,6 +132,7 @@ def run_final_gate(report_data_path: str | Path, project_root: str | Path, run_i
 
     warnings.extend(_check_artifacts(pr, run_id))
     warnings.extend(_check_ui_proof(report_data, pr))
+    warnings.extend(_check_stub_content(report_data, pr))
     warnings.extend(_check_learnings_audit(report_data, pr))
 
     return {

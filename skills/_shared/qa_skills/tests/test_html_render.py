@@ -97,3 +97,67 @@ def test_render_no_external_resources():
     assert 'src="http' not in html
     assert "googleapis" not in html
     assert "cdnjs" not in html
+
+
+# ---------- B3: stub + contract banners ----------
+
+
+def test_no_banner_when_clean():
+    html = render_html(_minimal_report())
+    # .banner-warn lives in CSS always; the rendered <div class="banner-warn">
+    # must not appear when there are no stubs/violations.
+    assert 'class="banner-warn"' not in html
+
+
+def test_stub_banner_renders_from_coverage_stub_files():
+    rd = _minimal_report()
+    rd["coverage_by_category"]["api"]["stub_files"] = [
+        "tests/api/auth/test_login.py",
+        "tests/api/users/test_users.py",
+    ]
+    html = render_html(rd)
+    assert 'class="banner-warn"' in html
+    assert "Stub tests detected" in html
+    assert "tests/api/auth/test_login.py" in html
+    assert "tests/api/users/test_users.py" in html
+
+
+def test_stub_banner_renders_from_warnings():
+    rd = _minimal_report(warnings=[
+        "stub_content:ui:tests/ui/Home/Home.spec.ts",
+        "stub_content:a11y:tests/a11y/Login/Login.a11y.spec.ts",
+    ])
+    html = render_html(rd)
+    assert 'class="banner-warn"' in html
+    assert "tests/ui/Home/Home.spec.ts" in html
+    assert "tests/a11y/Login/Login.a11y.spec.ts" in html
+
+
+def test_contract_violation_banner_renders():
+    rd = _minimal_report(warnings=[
+        "path_contract_violation:tests/api/auth/test_login.api.test.ts",
+    ])
+    html = render_html(rd)
+    assert 'class="banner-warn"' in html
+    assert "Path-contract violations" in html
+    assert "tests/api/auth/test_login.api.test.ts" in html
+
+
+def test_banners_in_hebrew_locale():
+    rd = _minimal_report(locale="he", warnings=[
+        "stub_content:ui:tests/ui/Home/Home.spec.ts",
+    ])
+    html = render_html(rd)
+    assert "זוהו קבצי stub" in html
+
+
+def test_stub_files_deduplicated_across_sources():
+    """Same path in stub_files + warnings → listed once."""
+    rd = _minimal_report(warnings=[
+        "stub_content:api:tests/api/auth/test_login.py",
+    ])
+    rd["coverage_by_category"]["api"]["stub_files"] = [
+        "tests/api/auth/test_login.py",
+    ]
+    html = render_html(rd)
+    assert html.count("tests/api/auth/test_login.py") == 1

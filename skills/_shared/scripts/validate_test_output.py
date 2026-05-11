@@ -4,6 +4,7 @@
 Usage (single output object):
     cat agent_result.json | python skills/_shared/scripts/validate_test_output.py
     python skills/_shared/scripts/validate_test_output.py --json '{"agent": ...}'
+    python skills/_shared/scripts/validate_test_output.py --language typescript --json '...'
 """
 from __future__ import annotations
 
@@ -19,6 +20,12 @@ from qa_skills.validators import validate_test_output  # noqa: E402
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="validate_test_output")
     parser.add_argument("--json", help="Inline JSON. If absent, reads from stdin.")
+    parser.add_argument(
+        "--language",
+        default=None,
+        help="Project language: python | typescript | javascript. "
+        "Enables language-aware path regex enforcement.",
+    )
     args = parser.parse_args()
 
     raw = args.json if args.json is not None else sys.stdin.read()
@@ -28,7 +35,7 @@ if __name__ == "__main__":
         print(f"FAIL: {type(e).__name__}: {e}", file=sys.stderr)
         sys.exit(3)
 
-    errors = validate_test_output(obj)
+    errors = validate_test_output(obj, language=args.language)
     if errors:
         print(json.dumps({"status": "fail", "errors": errors}))
         sys.exit(2)

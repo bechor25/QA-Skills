@@ -215,19 +215,38 @@ Write `RunContext.changed_count`, `RunContext.new_count`. Write checkpoint(2).
 
 **Default mode: `auto` — build the plan, display it to the user as a status line, then proceed immediately. Do not pause for confirmation.**
 
-## `has_signal()` — extracted to `qa_skills.strategy`
+## `has_signal()` + `decide_category()` — extracted to `qa_skills.strategy`
 
-Logic lives in `qa_skills.strategy.has_signal(category, analysis)`. CLI:
+Logic lives in `qa_skills.strategy`. Two functions:
+- `has_signal(category, analysis)` — pure source-only signal check.
+- `decide_category(category, analysis, server_plan, reachable)` — adds the
+  server-reachability matrix for `ui`/`a11y` so the strategy plan reflects
+  dispatch reality **before** any sub-agent is invoked.
+
+CLI:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/strategy.py" --analysis "${ANALYSIS_PATH}" --category "${CATEGORY}"
-# stdout: {"category":"api","should_run":true,"reason":""}
+# signal only (unit/api/security/contract):
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/strategy.py" \
+    --analysis "${ANALYSIS_PATH}" --category "${CATEGORY}"
+
+# ui / a11y — apply the server matrix at Phase 2.5:
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/strategy.py" \
+    --analysis "${ANALYSIS_PATH}" --category ui \
+    --with-server-gate [--allow-start]
+# stdout: {"category":"ui","should_run":false,"reason":"server_unreachable_no_start_permission"}
 ```
 
 Behavior summary (full source: `skills/_shared/qa_skills/strategy.py`):
 - `unit` → True iff any non-frontend module exists; else `no_non_frontend_modules`.
 - `api` / `contract` → True iff any route has `kind == "api"`; else `no_routes_detected`.
-- `ui` / `a11y` → True iff `stats.has_frontend` AND `frontend_kind ∈ {spa, ssr, mixed}`; else `no_frontend_detected` / `frontend_kind_none` / `unsupported_frontend_kind:<x>`.
+- `ui` / `a11y` →
+  1. Source signal: `stats.has_frontend` AND `frontend_kind ∈ {spa, ssr, mixed}`; else `no_frontend_detected` / `frontend_kind_none` / `unsupported_frontend_kind:<x>`.
+  2. **Server matrix** (`decide_category` only):
+     - reachable → run
+     - unreachable + `!start_allowed` → skip `server_unreachable_no_start_permission`
+     - unreachable + `start_allowed` + no `start_command` → skip `server_unreachable_no_start_command`
+     - unreachable + `start_allowed` + `start_command` → run (orchestrator spawns before dispatch)
 - `security` → True iff any module has `has_auth` OR `has_db_queries` OR non-empty `input_fields`; else `no_auth_db_or_input_signals`.
 
 Do not duplicate this logic in this file or in any sub-agent.
@@ -243,6 +262,8 @@ no_frontend_detected           # backend-only project
 frontend_kind_none             # frontend dir exists but no spa/ssr signals
 unsupported_frontend_kind:<x>  # detected kind not supported
 no_auth_db_or_input_signals    # no security signals present
+server_unreachable_no_start_permission   # ui/a11y: server down, autostart not allowed
+server_unreachable_no_start_command      # ui/a11y: server down, allowed but no start_command
 env_validator_removed:<reason> # env-validator pulled this category
 disabled_by_caller             # caller opted out via input.categories
 ```
@@ -309,11 +330,23 @@ plan = {
   "mode": "auto",
 }
 
+# Build server_plan ONCE and probe reachability ONCE. Reused below.
+server_plan = build_server_plan(analysis, mode=plan["mode"], allow_start_explicit=allow_start)
+server_reachable = bool(server_plan.url) and is_reachable(server_plan.url)
+
 for c in categories_enabled:
-    ok, reason = has_signal(c, analysis)
-    (plan["summary"]["categories_planned"] if ok
-     else plan["summary"]["categories_skipped"]).append(
-        c if ok else {"name": c, "reason": reason})
+    if c in ("ui", "a11y"):
+        # Apply the server-reachability matrix at strategy time, NOT dispatch.
+        # This prevents qa-ui-test / qa-a11y-test from ever being invoked
+        # against an unreachable server (the historical stub-emission path).
+        ok, reason = decide_category(c, analysis, server_plan, server_reachable)
+    else:
+        ok, reason = has_signal(c, analysis)
+
+    if ok:
+        plan["summary"]["categories_planned"].append(c)
+    else:
+        plan["summary"]["categories_skipped"].append({"name": c, "reason": reason})
 
 # env-validator-removed categories carry their own reason
 for r in env_categories_removed:
@@ -347,26 +380,141 @@ Save plan JSON to `${logs_dir}/strategy.json`. Write checkpoint(2.5).
 
 Invoke applicable test-generation agents **in parallel** by issuing multiple Task calls in a single response. Each agent runs in its own isolated context.
 
-Decision matrix — **use `has_signal()` from Phase 2.5 as the sole authority.** Do not re-derive logic here.
+Decision matrix — **`plan["summary"]["categories_planned"]` from Phase 2.5 is the sole authority.** Do not re-derive signal or server gates here. Phase 2.5 already applied `has_signal` for unit/api/security/contract and `decide_category` (incl. server matrix) for ui/a11y.
+
+Each planned category is dispatched **in batches** when its `expected_files` count exceeds what fits in `per_agent_timeout_seconds` (A5 + A5.b). The batch_state file makes re-runs idempotent: a killed orchestrator resumes from the first incomplete batch.
 
 ```python
-for cat in ("unit", "api", "ui", "security", "a11y", "contract"):
-    if cat not in categories_enabled:
-        continue   # already in categories_skipped with reason "disabled_by_caller"
-    ok, reason = has_signal(cat, analysis)
-    if not ok:
-        # Already in plan["summary"]["categories_skipped"] from Phase 2.5; do nothing here.
+# qa_skills.budget supplies: estimate_fit, split_into_batches, batch_id,
+# load_batch_state, save_batch_state, mark_completed, pending_batches,
+# summarize_prior_batches, chunked, MAX_PARALLEL_BATCHES_PER_CATEGORY.
+state = load_batch_state(logs_dir)
+
+for cat in plan["summary"]["categories_planned"]:
+    agent_name = CATEGORY_TO_AGENT[cat]
+    expected   = expected_files_by_cat[cat]
+    fits, n    = estimate_fit(len(expected), budgets["per_agent_timeout_seconds"])
+    batches    = split_into_batches(expected, fits)
+
+    todo = pending_batches(state, cat, batches)   # skip already-completed
+    if not todo:
         continue
-    dispatch(CATEGORY_TO_AGENT[cat])   # qa-unit-test, qa-api-test, etc.
+
+    # Window-by-window: parallel within a window, sequential across windows.
+    for window in chunked(todo, MAX_PARALLEL_BATCHES_PER_CATEGORY):
+        prior = summarize_prior_batches(state, cat)   # paths only, no code
+        in_flight = []
+        for idx, batch_files in window:
+            agent_input = build_input(
+                agent_name, cat, batch_files,
+                prior_batches_summary=prior,           # context-warm
+            )
+            in_flight.append(
+                (idx, Task(agent_name, agent_input, run_in_background=True))
+            )
+        for idx, task_handle in in_flight:
+            r = await_task(task_handle)
+
+            # --- A2: hard policy — no stub fallback ---
+            emitted  = {o["path"] for o in r.get("outputs", [])
+                        if validate_path(o["path"], language=analysis.language)[0]}
+            expected = {ef["path"] for ef in window_expected_by_idx[idx]}
+            extras   = sorted(emitted - expected)   # wrong-named (e.g. test_X.ts on TS)
+            missing  = sorted(expected - emitted)   # never generated
+
+            for p in extras:
+                # Delete the wrong-named file so it cannot count toward coverage.
+                Path(project_root / p).unlink(missing_ok=True)
+                warnings.append(f"path_contract_violation:{p}")
+
+            if missing:
+                r["status"]        = "partial" if r.get("status") == "passed" else r["status"]
+                r["missing_items"] = sorted(set(r.get("missing_items", []) + missing))
+                warnings.append(f"agent_unmet_contract:{agent_name}:{len(missing)}_files")
+                # NEVER: write_stub(p), write_placeholder(p), scaffold(p), copy_template(p)
+                # Missing files must surface in coverage[cat].missing_items[], not as files.
+
+            output_paths = [o["path"] for o in r.get("outputs", [])
+                            if o["path"] in emitted]
+            mark_completed(state, batch_id(cat, idx), output_paths)
+            save_batch_state(logs_dir, state)         # persist after each batch
+
+            # B4 telemetry — atomic per-batch log to disk for postmortem.
+            write_agent_output(logs_dir, agent_name, r, batch_idx=idx)
+            agent_outputs[cat].append(r)
+
+    # B4: collapse per-batch logs into merged agent_output_<agent>.json.
+    write_merged_agent_output(logs_dir, agent_name, agent_outputs[cat])
 ```
 
-| Category | Agent | Skip when (reason code) |
+### Telemetry — per-agent output logs (B4)
+
+Every Task return value is persisted **before** Phase 4 aggregation. Layout:
+
+```
+${LOGS_DIR}/
+  agent_output_qa-unit-test.json              # merged across batches
+  agent_output_qa-unit-test_batch_000.json    # one per batch
+  agent_output_qa-api-test.json
+  ...
+```
+
+Merge rules (`qa_skills.agent_log.write_merged_agent_output`):
+- `status` collapses to the worst observed (`error > partial > skipped > passed`).
+- `outputs[]` concatenates in batch order.
+- `missing_items[]` + `warnings[]` are deduplicated and sorted.
+- `batches[]` records `{index, status}` per batch for drill-down.
+
+CLI alternative for orchestration shells:
+
+```bash
+echo "$AGENT_RESULT_JSON" | python3 \
+    "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/agent_log.py" write \
+    --logs-dir "${LOGS_DIR}" --agent "${AGENT}" --batch-index "${IDX}"
+
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/agent_log.py" merge \
+    --logs-dir "${LOGS_DIR}" --agent "${AGENT}"
+```
+
+### Hard policy — no stub fallback
+
+Track A2 forbids every orchestrator code path that previously synthesised a
+placeholder file under `tests/` to satisfy `expected_files`. The matrix:
+
+| Sub-agent emits | Orchestrator action |
+|---|---|
+| Path in `expected_files` AND passes `validate_path(language)` | accept |
+| Path NOT in `expected_files` (extras) | **delete file**, log `path_contract_violation:<path>` |
+| Path in `expected_files` but not emitted (missing) | **add to `missing_items[]`**, downgrade `status` to `partial`. Do NOT write a stub. |
+| Path fails `validate_path(language)` | reject as extras (delete + log) |
+
+Coverage math (`qa_skills.coverage.compute_coverage`) consumes `missing_items[]`
+so honest gaps show up in `coverage[cat].missing_items[]` and in the HTML
+report. The legacy "fill missing slots with stubs to keep the table green"
+behaviour is gone; pytest at `test_final_gate.py` (A1) guarantees that any
+remaining stub file escalates `status: partial` with a `stub_content:` warning.
+
+CLI for orchestration shells that need any one step in isolation:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/budget.py" estimate \
+    --files "${COUNT}" --timeout "${PER_AGENT_TIMEOUT_SECONDS}"
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/budget.py" pending \
+    --logs-dir "${LOGS_DIR}" --category "${CAT}" --batch-count "${N}"
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/budget.py" mark-completed \
+    --logs-dir "${LOGS_DIR}" --category "${CAT}" --index "${IDX}" \
+    --paths "${EMITTED_JSON_ARRAY}"
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/budget.py" prior-summary \
+    --logs-dir "${LOGS_DIR}" --category "${CAT}"
+```
+
+| Category | Agent | Skip reasons (set in Phase 2.5) |
 |---|---|---|
 | `unit`     | `qa-unit-test`     | `no_non_frontend_modules` |
 | `api`      | `qa-api-test`      | `no_routes_detected` |
-| `ui`       | `qa-ui-test`       | `no_frontend_detected` / `frontend_kind_none` / `unsupported_frontend_kind:<x>` |
+| `ui`       | `qa-ui-test`       | `no_frontend_detected` / `frontend_kind_none` / `unsupported_frontend_kind:<x>` / `server_unreachable_no_start_permission` / `server_unreachable_no_start_command` |
 | `security` | `qa-security-test` | `no_auth_db_or_input_signals` |
-| `a11y`     | `qa-a11y-test`     | `no_frontend_detected` / `frontend_kind_none` |
+| `a11y`     | `qa-a11y-test`     | `no_frontend_detected` / `frontend_kind_none` / `server_unreachable_no_start_permission` / `server_unreachable_no_start_command` |
 | `contract` | `qa-contract-test` | `no_routes_detected` |
 
 Emit one `⏭️ skipped` banner per category with the exact reason code. Example for backend-services project:
@@ -399,7 +547,8 @@ Every Task invocation to a test-gen agent MUST include a `path_contract` block i
   "project_root": "${RunContext.project_root}",
   "test_root": "${RunContext.project_root}/tests",
   "category_root": "${RunContext.project_root}/tests/<category>",
-  "required_pattern": "^tests/(unit|api|ui|security|a11y|contract)/(?:[^/]+/)+(test_[^/]+\\.py|[^/]+\\.(spec|test|api\\.test|security\\.test|contract\\.test|a11y\\.spec)\\.(ts|js))$",
+  "required_pattern": "<language-aware: emit qa_skills.validators.language_pattern(analysis.language)>",
+  "language": "${analysis.language}",
   "policy": "exact",
   "expected_files": [
     {"path": "tests/api/auth/test_login.py",  "covers": ["POST /api/login"]},
@@ -416,6 +565,8 @@ Every Task invocation to a test-gen agent MUST include a `path_contract` block i
 ```
 
 `expected_files` = slice of `compute_expected_files()` (Phase 2.5) for the current category. `policy: "exact"` = set equality; extras OR missing both fail. v1 always exact.
+
+`required_pattern` is emitted **per project language** via `qa_skills.validators.language_pattern(language)`. Python projects receive `PY_PATH_REGEX` (enforces `test_<name>.py`); TS/JS projects receive `TS_PATH_REGEX` (forbids `test_` prefix, requires `.spec.ts`/`.test.ts`/`.<cat>.test.ts`). Sub-agents pass `language` to `validate_path()` so violations surface as `path_regex_violation_<language>:<path>`. This prevents a sub-agent on a TS project from emitting Python-style names (and vice versa) that the orphaned-fallback path used to silently accept.
 
 Violations: file deleted, output rejected, `warnings: ["path_violation: <path>"]`, agent → `partial`.
 

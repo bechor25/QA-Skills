@@ -1,8 +1,25 @@
-"""has_signal — does this category have anything to test in this project?"""
+"""Strategy gates.
+
+* `has_signal(category, analysis)` — does the project contain anything for
+  this category? Pure source-only check.
+* `decide_category(category, analysis, server_plan, reachable)` — combines
+  `has_signal` with the server-reachability matrix for `ui`/`a11y` so the
+  orchestrator's strategy phase reflects dispatch reality BEFORE any sub-agent
+  is invoked. The matrix mirrors `reference/server-policy.md`:
+
+  | reachable | start_allowed | start_command | decision                                       |
+  |-----------|---------------|---------------|------------------------------------------------|
+  | true      | (any)         | (any)         | run                                            |
+  | false     | true          | non-empty     | run (orchestrator will spawn before dispatch)  |
+  | false     | true          | empty/null    | skip:server_unreachable_no_start_command       |
+  | false     | false         | (any)         | skip:server_unreachable_no_start_permission    |
+"""
 
 from __future__ import annotations
 
-from .types import Analysis
+from typing import Optional
+
+from .types import Analysis, ServerPlan
 
 
 def has_signal(category: str, analysis: Analysis) -> tuple[bool, str]:
@@ -48,7 +65,39 @@ def has_signal(category: str, analysis: Analysis) -> tuple[bool, str]:
     return (False, f"unknown_category:{category}")
 
 
-__all__ = ["has_signal"]
+_SERVER_GATED = frozenset({"ui", "a11y"})
+
+
+def decide_category(
+    category: str,
+    analysis: Analysis,
+    server_plan: Optional[ServerPlan] = None,
+    reachable: bool = False,
+) -> tuple[bool, str]:
+    """Combine `has_signal` with the server-reachability matrix.
+
+    For non-server-gated categories the result is identical to `has_signal`.
+    For `ui`/`a11y` the server matrix runs after the signal check.
+
+    Returns (should_run, reason_code). reason_code is "" when should_run.
+    """
+    ok, reason = has_signal(category, analysis)
+    if not ok:
+        return (False, reason)
+    if category not in _SERVER_GATED:
+        return (True, "")
+    if reachable:
+        return (True, "")
+    if server_plan is None:
+        return (False, "server_unreachable_no_start_permission")
+    if not server_plan.start_allowed:
+        return (False, "server_unreachable_no_start_permission")
+    if not server_plan.start_command:
+        return (False, "server_unreachable_no_start_command")
+    return (True, "")
+
+
+__all__ = ["has_signal", "decide_category"]
 
 
 # CLI wrapper: skills/_shared/scripts/strategy.py
@@ -58,13 +107,29 @@ if __name__ == "__main__":
     import sys
 
     from .analysis import load_analysis
+    from .server import build_server_plan, is_reachable
 
     parser = argparse.ArgumentParser(prog="qa_skills.strategy")
     parser.add_argument("--analysis", required=True)
     parser.add_argument("--category", required=True)
+    parser.add_argument(
+        "--with-server-gate",
+        action="store_true",
+        help="Apply server-reachability matrix for ui/a11y (decide_category).",
+    )
+    parser.add_argument(
+        "--allow-start",
+        action="store_true",
+        help="Permit orchestrator to spawn start_command. Default off.",
+    )
     args = parser.parse_args()
 
     a = load_analysis(args.analysis)
-    ok, reason = has_signal(args.category, a)
+    if args.with_server_gate:
+        plan = build_server_plan(a, allow_start_explicit=args.allow_start)
+        reachable = bool(plan.url) and is_reachable(plan.url)
+        ok, reason = decide_category(args.category, a, plan, reachable)
+    else:
+        ok, reason = has_signal(args.category, a)
     print(json.dumps({"category": args.category, "should_run": ok, "reason": reason}))
     sys.exit(0)

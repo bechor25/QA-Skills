@@ -88,8 +88,17 @@ def build_coverage_by_category(
             }
             continue
 
-        cov = compute_coverage(cat, agent_out.get("outputs", []), analysis)
+        cov = compute_coverage(
+            cat, agent_out.get("outputs", []), analysis, project_root=project_root
+        )
         cov["status"] = normalized
+        # If the sub-agent returned missing_items from A2, merge them so the
+        # report shows the honest gap even when no coverage call surfaced them.
+        agent_missing = agent_out.get("missing_items") or []
+        if agent_missing:
+            cov["missing_items"] = sorted(
+                set(cov.get("missing_items", []) or []) | set(agent_missing)
+            )
         coverage[cat] = cov
 
         # ui/a11y get artifacts inline too

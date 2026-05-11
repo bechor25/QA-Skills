@@ -93,3 +93,56 @@ def test_phantom_coverage_filtered_out(fastapi):
     cov = compute_coverage("api", outputs, fastapi)
     assert "POST /api/nonexistent" not in cov["covered_items"]
     assert "POST /api/login" in cov["covered_items"]
+
+
+# ---------- B2: stub-aware coverage ----------
+
+
+def _write_test(root: Path, rel: str, body: str) -> None:
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+
+
+def test_stub_aware_excludes_stub_file_from_coverage(fastapi, tmp_path):
+    """Stub-marked file: its covers do NOT count; surfaces in stub_files."""
+    _write_test(
+        tmp_path, "tests/api/auth/test_login.py",
+        "# Auto-generated stub. Replace.\ndef test_x():\n    assert True  # placeholder\n",
+    )
+    _write_test(
+        tmp_path, "tests/api/health/test_health.py",
+        "def test_h():\n    res = client.get('/api/health')\n    assert res.status_code == 200\n",
+    )
+
+    outputs = [
+        {"path": "tests/api/auth/test_login.py",   "covers": ["POST /api/login"]},
+        {"path": "tests/api/health/test_health.py", "covers": ["GET /api/health"]},
+    ]
+    cov = compute_coverage("api", outputs, fastapi, project_root=tmp_path)
+
+    assert cov["stub_files"] == ["tests/api/auth/test_login.py"]
+    assert "POST /api/login" not in cov["covered_items"]
+    assert "GET /api/health" in cov["covered_items"]
+    # POST /api/login is now a missing item again (stub did not really cover it).
+    assert "POST /api/login" in cov["missing_items"]
+
+
+def test_stub_aware_back_compat_without_project_root(fastapi):
+    """Caller that does not pass project_root keeps legacy behaviour."""
+    outputs = [
+        {"path": "tests/api/auth/test_login.py", "covers": ["POST /api/login"]},
+    ]
+    cov = compute_coverage("api", outputs, fastapi)  # no project_root
+    assert cov["stub_files"] == []
+    assert "POST /api/login" in cov["covered_items"]
+
+
+def test_stub_aware_missing_file_treated_as_non_stub(fastapi, tmp_path):
+    """Referenced file does not exist on disk → cannot detect stub → counted."""
+    outputs = [
+        {"path": "tests/api/auth/test_login.py", "covers": ["POST /api/login"]},
+    ]
+    cov = compute_coverage("api", outputs, fastapi, project_root=tmp_path)
+    assert cov["stub_files"] == []
+    assert "POST /api/login" in cov["covered_items"]

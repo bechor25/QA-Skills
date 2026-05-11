@@ -161,19 +161,19 @@ def test_ui_typescript(express):
 
 # ---------- Path regex compliance ----------
 
-PATH_REGEX = __import__("qa_skills.validators", fromlist=["PATH_REGEX"]).PATH_REGEX
+from qa_skills.validators import PY_PATH_REGEX, TS_PATH_REGEX
 
 
 @pytest.mark.parametrize("category", ["unit", "api", "security", "contract", "ui", "a11y"])
 def test_all_paths_match_required_pattern_python(fastapi, category):
     for ef in compute_expected_files(category, fastapi, "python"):
-        assert PATH_REGEX.match(ef.path), f"{category}: {ef.path}"
+        assert PY_PATH_REGEX.match(ef.path), f"{category}: {ef.path}"
 
 
 @pytest.mark.parametrize("category", ["unit", "api", "security", "contract", "ui", "a11y"])
 def test_all_paths_match_required_pattern_typescript(express, category):
     for ef in compute_expected_files(category, express, "typescript"):
-        assert PATH_REGEX.match(ef.path), f"{category}: {ef.path}"
+        assert TS_PATH_REGEX.match(ef.path), f"{category}: {ef.path}"
 
 
 # ---------- covers[] semantics ----------
