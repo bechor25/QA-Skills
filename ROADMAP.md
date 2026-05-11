@@ -268,22 +268,22 @@ qa-agent version
 - [x] 3.10 `quality/selector_validator.py` — for UI: prefer `data-testid`, reject brittle XPath
 - [x] 3.11 Generation loop: scenario → generate → critique → improve → validate → write
 
-## Phase 4 — Execution
+## Phase 4 — Execution ✅
 
-- [ ] 4.1 `runtime/workspace.py` — per-run isolated workspace under `.qa-agent/runs/<id>/`
-- [ ] 4.2 `runtime/process_manager.py` — subprocess wrapper with timeout, capture, kill-tree
-- [ ] 4.3 `runtime/install_planner.py` — decide what to install based on tech stack
-- [ ] 4.4 `runtime/install_manager.py` — pm dispatch (npm/pnpm/pip/poetry/maven/gradle), records to `installation_history.json`
-- [ ] 4.5 `executors/base.py` — common Executor interface, result schema
-- [ ] 4.6 `executors/pytest_runner.py`
-- [ ] 4.7 `executors/jest_runner.py`
-- [ ] 4.8 `executors/playwright_runner.py` (browser install handled by install manager)
-- [ ] 4.9 `executors/maven_runner.py`
-- [ ] 4.10 `executors/gradle_runner.py`
-- [ ] 4.11 `executors/security_runner.py` (e.g., zap-baseline, semgrep)
-- [ ] 4.12 `executors/a11y_runner.py` (axe via playwright)
-- [ ] 4.13 `agent/execution_controller.py` — orchestrates executor selection, batches, retries
-- [ ] 4.14 Append `execution_history.json` for every run
+- [x] 4.1 `runtime/workspace.py` — per-run isolated workspace under `.qa-agent/runs/<id>/`
+- [x] 4.2 `runtime/process_manager.py` — subprocess wrapper with timeout, capture, kill-tree
+- [x] 4.3 `runtime/install_planner.py` — decide what to install based on tech stack
+- [x] 4.4 `runtime/install_manager.py` — pm dispatch (npm/pnpm/pip/poetry/maven/gradle), records to `installation_history.json`
+- [x] 4.5 `executors/base.py` — common Executor interface, result schema
+- [x] 4.6 `executors/pytest_runner.py`
+- [x] 4.7 `executors/jest_runner.py`
+- [x] 4.8 `executors/playwright_runner.py` (browser install handled by install manager)
+- [x] 4.9 `executors/maven_runner.py`
+- [x] 4.10 `executors/gradle_runner.py`
+- [x] 4.11 `executors/security_runner.py` (e.g., zap-baseline, semgrep)
+- [x] 4.12 `executors/a11y_runner.py` (axe via playwright)
+- [x] 4.13 `agent/execution_controller.py` — orchestrates executor selection, batches, retries
+- [x] 4.14 Append `execution_history.json` for every run
 
 ## Phase 5 — Quality (Flaky + Self-Healing)
 
