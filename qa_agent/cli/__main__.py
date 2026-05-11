@@ -1,0 +1,79 @@
+"""qa-agent CLI entry point.
+
+Invoked by:
+  - the `qa-master` Claude Code agent (via skill triggers)
+  - users directly: `python -m qa_agent.cli ...` or `qa-agent ...`
+
+Subcommands are thin shells that delegate to qa_agent.cli.commands.*; each
+command takes a parsed argparse namespace, runs its phase, and exits with
+0 on success or a non-zero code on hard failure.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from typing import Sequence
+
+from .. import __version__
+from ..shared.logging import get_logger
+from .commands import analyze, full_run, rerun, report, state
+
+log = get_logger("qa_agent.cli")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="qa-agent",
+        description="QA Operating System — scan, plan, generate, run, report.",
+    )
+    parser.add_argument("--version", action="version", version=f"qa-agent {__version__}")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_full = sub.add_parser("full-run", help="Scan, plan, generate, execute, report.")
+    p_full.add_argument("--project", default=None)
+    p_full.add_argument("--categories", default=None, help="Comma-separated subset.")
+    p_full.add_argument("--no-llm", action="store_true", help="Run non-LLM phases only.")
+    p_full.set_defaults(func=full_run.run)
+
+    p_analyze = sub.add_parser("analyze", help="Scan and build the knowledge graph only.")
+    p_analyze.add_argument("--project", default=None)
+    p_analyze.set_defaults(func=analyze.run)
+
+    p_rerun = sub.add_parser("rerun", help="Re-execute a previously generated suite.")
+    p_rerun.add_argument("--project", default=None)
+    p_rerun.add_argument(
+        "--scope",
+        choices=["flaky", "changed", "failed", "all"],
+        default="changed",
+    )
+    p_rerun.set_defaults(func=rerun.run)
+
+    p_report = sub.add_parser("report", help="Render the latest HTML report.")
+    p_report.add_argument("--project", default=None)
+    p_report.add_argument("--open", action="store_true", dest="open_browser")
+    p_report.set_defaults(func=report.run)
+
+    p_state = sub.add_parser("state", help="Inspect or reset state.")
+    p_state.add_argument("--project", default=None)
+    p_state.add_argument("action", choices=["show", "reset"])
+    p_state.set_defaults(func=state.run)
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return int(args.func(args) or 0)
+    except KeyboardInterrupt:
+        log.warning("interrupted")
+        return 130
+    except Exception:  # noqa: BLE001
+        log.exception("qa-agent failed")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

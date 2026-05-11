@@ -1,6 +1,7 @@
 {
   "name": "qa-skills",
-  "description": "Full QA test suite generator for any codebase. One command generates unit, API, UI, and security tests, runs them, fixes failures, and produces an HTML coverage report. Supports TypeScript/JavaScript and Python.",
+  "version": "2.0.0",
+  "description": "QA Operating System — autonomous test scanning, generation, execution, and reporting. A single QA Master agent orchestrates; a Python engine does the work. Supports TypeScript/JavaScript, Python, and Java.",
   "author": {
     "name": "Bechor Simhaev",
     "url": "https://github.com/bechor25"

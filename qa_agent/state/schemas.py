@@ -1,0 +1,190 @@
+"""Pydantic schemas for every state file.
+
+Versioning: each top-level model carries `schema_version`. When a field is
+added/removed, bump it and add a branch to `migrations.py`.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+# ----------------------------------------------------------------------
+# project_map.json
+# ----------------------------------------------------------------------
+
+class FileEntry(BaseModel):
+    path: str
+    language: str
+    size_bytes: int
+    is_test: bool = False
+
+
+class FrameworkEntry(BaseModel):
+    name: str
+    language: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: list[str] = Field(default_factory=list)
+
+
+class ProjectMap(BaseModel):
+    schema_version: int = 1
+    project_root: str
+    scanned_at: datetime
+    languages: dict[str, int] = Field(default_factory=dict)  # lang -> file count
+    files: list[FileEntry] = Field(default_factory=list)
+    frameworks: list[FrameworkEntry] = Field(default_factory=list)
+    package_managers: list[str] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# dependency_graph.json
+# ----------------------------------------------------------------------
+
+class ModuleNode(BaseModel):
+    id: str
+    path: str
+    language: str
+    imports: list[str] = Field(default_factory=list)
+    imported_by: list[str] = Field(default_factory=list)
+
+
+class DependencyGraph(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    modules: list[ModuleNode] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# knowledge_graph.json
+# ----------------------------------------------------------------------
+
+class SymbolEntry(BaseModel):
+    name: str
+    kind: Literal["function", "class", "method", "route", "component"]
+    path: str
+    line: int | None = None
+
+
+class FeatureEntry(BaseModel):
+    id: str
+    name: str
+    summary: str
+    module_ids: list[str] = Field(default_factory=list)
+    symbols: list[SymbolEntry] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+
+
+class ModuleSummary(BaseModel):
+    id: str
+    path: str
+    summary: str
+    features: list[str] = Field(default_factory=list)
+
+
+class KnowledgeGraph(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    project_summary: str
+    modules: list[ModuleSummary] = Field(default_factory=list)
+    features: list[FeatureEntry] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# risk_matrix.json
+# ----------------------------------------------------------------------
+
+class RiskEntry(BaseModel):
+    capability: str
+    feature_id: str | None = None
+    business_impact: int = Field(ge=0, le=5)
+    state_complexity: int = Field(ge=0, le=5)
+    security_exposure: int = Field(ge=0, le=5)
+    change_frequency: int = Field(ge=0, le=5)
+    score: float = Field(ge=0.0)
+    rationale: str
+
+
+class RiskMatrix(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    entries: list[RiskEntry] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# strategy.json
+# ----------------------------------------------------------------------
+
+class StrategyEntry(BaseModel):
+    capability: str
+    feature_id: str | None = None
+    categories: list[str] = Field(default_factory=list)  # ui|api|security|...
+    priority: int = Field(ge=0, le=10)
+    rationale: str
+
+
+class Strategy(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    entries: list[StrategyEntry] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# execution_history.json
+# ----------------------------------------------------------------------
+
+class ExecutionRecord(BaseModel):
+    run_id: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    category: str
+    test_files: list[str] = Field(default_factory=list)
+    passed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    duration_seconds: float = 0.0
+    exit_code: int | None = None
+
+
+class ExecutionHistory(BaseModel):
+    schema_version: int = 1
+    records: list[ExecutionRecord] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# installation_history.json
+# ----------------------------------------------------------------------
+
+class InstallRecord(BaseModel):
+    run_id: str
+    timestamp: datetime
+    manager: str  # npm | pnpm | pip | poetry | maven | gradle
+    args: list[str]
+    exit_code: int
+    duration_seconds: float
+
+
+class InstallationHistory(BaseModel):
+    schema_version: int = 1
+    records: list[InstallRecord] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# flaky_state.json
+# ----------------------------------------------------------------------
+
+class FlakyEntry(BaseModel):
+    test_id: str
+    classification: Literal["timing", "network", "env", "race", "order"]
+    runs: int
+    failures: int
+    last_seen: datetime
+    rationale: str = ""
+
+
+class FlakyState(BaseModel):
+    schema_version: int = 1
+    entries: list[FlakyEntry] = Field(default_factory=list)

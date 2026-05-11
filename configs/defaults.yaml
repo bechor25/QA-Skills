@@ -1,0 +1,62 @@
+# QA Agent — default configuration.
+# Override per-project at <project>/.qa-agent/config.yaml.
+
+# ---- Scanning ----
+scan:
+  ignore_dirs:
+    - node_modules
+    - .git
+    - .venv
+    - venv
+    - dist
+    - build
+    - .next
+    - .nuxt
+    - target
+    - .gradle
+    - .qa-agent
+    - coverage
+    - __pycache__
+  max_file_size_bytes: 524288   # 512 KB; files larger are summarized only
+  follow_symlinks: false
+
+# ---- Languages we generate tests for ----
+languages:
+  - typescript
+  - javascript
+  - python
+  - java
+
+# ---- Test categories enabled by default ----
+categories:
+  - api
+  - ui
+  - security
+  - accessibility
+  - performance
+  - regression
+
+# ---- LLM budgets ----
+llm:
+  global_token_cap: 200000
+  per_request_token_cap: 8000
+  prompt_char_cap: 4096
+  default_model: sonnet         # claude alias
+  models:
+    qa_master: sonnet
+    strategy: sonnet
+    scenario: sonnet
+    critic: sonnet
+    generator: sonnet
+
+# ---- Execution ----
+execution:
+  test_timeout_seconds: 300
+  install_timeout_seconds: 600
+  parallelism: 2
+  retries_on_flaky: 3
+
+# ---- Reporting ----
+report:
+  open_in_browser: false
+  redact_secrets: true
