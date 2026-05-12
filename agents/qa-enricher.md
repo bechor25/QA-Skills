@@ -17,49 +17,53 @@ The orchestrator passes you:
 
 - `capability` — e.g. `auth`, `permissions`, `user-mgmt`.
 - `project_root` — absolute path to the target project.
-- Hints about handler locations (route files, controllers, services).
+- `route_globs` — concrete backend file globs for this capability
+  (e.g. `["apps/api/src/routes/candidate*.ts"]`). **Use these and
+  only these to pick which handlers to read.** Do not Grep the whole
+  project.
+- `ui_globs` — concrete frontend file globs (e.g.
+  `["apps/web/src/pages/Candidates/*.tsx"]`). Same rule: read only
+  files that match these globs.
 
-If hints are missing, derive them from
-`<project_root>/.qa-agent/state/knowledge_graph.json` — look for the
-`files` array entries whose `capability` matches yours.
+`route_globs` and `ui_globs` come from
+`<project_root>/.qa-agent/state/capability_map.json` — the
+orchestrator looks up your capability and forwards them in the
+prompt. Trust them; they bound your scope.
+
+If `route_globs` is empty and `ui_globs` is empty, emit an empty
+contract with a `notes` entry explaining the capability has no scope
+and return — do not improvise a scan of the repo.
 
 ## What to read
 
 The contract has **two** sides — backend endpoints and frontend entry
-points. You must populate both. Read each side separately.
+points. You must populate both, scoped by the globs you were given.
 
-### Backend (always)
+### Backend
 
-For the target capability, read files that are likely handlers,
-controllers, services, validators, or DTOs:
+For every glob in `route_globs`, list the matching files with `Glob`
+and read them. These are your authoritative handler set — do not read
+files outside this list. If a handler imports a service/middleware
+that you need to verify a contract detail (auth_required, validation
+schema), read that one imported file too; never widen further.
 
-- Express/Fastify/Koa: `routes/`, `controllers/`, `middleware/auth*`.
-- NestJS: `*.controller.ts`, `*.service.ts`, `*.dto.ts`, `*.guard.ts`.
-- FastAPI/Flask: `routers/`, `views/`, `schemas/`, `dependencies.py`.
-- Next.js API routes: `app/api/**/route.ts`, `pages/api/**`.
+### Frontend
 
-### Frontend (required — do NOT skip)
+For every glob in `ui_globs`, list the matching files with `Glob` and
+read them. Pull `route`, primary `data-testid`/`aria-label` strings,
+and any `useRouter`/`<Route>` declarations that map this UI to a
+concrete browser path.
 
-For the **same capability**, also scan the project's UI source for
-matching pages/routes/components. Common roots:
+### Budget
 
-- Next.js app router: `app/**/page.tsx`, `app/**/layout.tsx`.
-- Next.js pages router: `pages/**/*.tsx` (excluding `pages/api/`).
-- React Router / Vue Router / SvelteKit: `routes/`, `src/pages/`,
-  `src/app/`, `src/views/`.
-- Monorepo conventions: `apps/web/`, `apps/client/`, `apps/frontend/`,
-  `packages/ui/`.
+Hard stop at **10 files / 3000 lines per side**. If your globs expand
+beyond that, read the largest-impact files first (the ones whose
+filenames most closely match the capability name) and skip the
+tail — the orchestrator can re-dispatch a follow-up if the contract
+turns out to be too thin.
 
-Match by name/keyword: a capability `auth` should pull files like
-`Login.tsx`, `Signup.tsx`, `MfaForm.tsx`; `admin` pulls
-`AdminDashboard.tsx`, `UsersTable.tsx`; `permissions` pulls
-`RoleEditor.tsx`. Use `Grep` for the capability keyword across UI
-roots, then `Read` the top 3–5 hits.
-
-Stop after ~10 files or ~3000 lines per side (backend + frontend = 20
-files / 6000 lines maximum). You are extracting a contract, not
-auditing the codebase. If a project genuinely has no frontend, record
-that fact in `notes` and emit `ui_entry_points: []` — never assume.
+If both `route_globs` and `ui_globs` are empty, emit an empty
+contract with a `notes` entry explaining the gap and return.
 
 ## What to emit
 

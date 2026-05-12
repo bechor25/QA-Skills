@@ -45,19 +45,52 @@ _DEFAULT_PACKS: dict[str, list[str]] = {
 def build_baseline_strategy(
     risk: schemas.RiskMatrix,
     allowed_categories: set[str] | None = None,
+    capability_map: schemas.CapabilityMap | None = None,
 ) -> schemas.Strategy:
-    """Deterministic strategy: high-risk capabilities get richer packs."""
+    """Deterministic strategy.
+
+    When a `capability_map` is provided (CLI clusterer + optional
+    mapper-agent refinement), the strategy is built from those
+    project-shaped capabilities — they carry concrete `route_globs`
+    and `ui_globs` that the qa-enricher will use as scope.
+
+    When no capability_map is given, fall back to the legacy
+    risk-matrix-driven flow that uses the hardcoded `_DEFAULT_PACKS`
+    keyword classifier (good enough for tiny projects, but produces
+    the catch-all `other` bucket on anything larger).
+    """
     allowed = allowed_categories or ALLOWED_CATEGORIES
     entries: list[schemas.StrategyEntry] = []
 
+    if capability_map and capability_map.capabilities:
+        risk_by_cap = {e.capability: e for e in risk.entries}
+        for cap in capability_map.capabilities:
+            score = risk_by_cap[cap.name].score if cap.name in risk_by_cap else cap.score_hint
+            pack = _pack_for_cluster(cap, score, allowed)
+            priority = _bucket_priority(score)
+            feature_id = risk_by_cap[cap.name].feature_id if cap.name in risk_by_cap else f"feat::{cap.name}"
+            entries.append(
+                schemas.StrategyEntry(
+                    capability=cap.name,
+                    feature_id=feature_id,
+                    categories=pack,
+                    priority=priority,
+                    rationale=(
+                        f"clustered pack for {cap.name} — {cap.route_count} routes, "
+                        f"{cap.ui_count} ui files, score={score:.1f}"
+                    ),
+                )
+            )
+        log.info("strategy: built %d entries from capability_map", len(entries))
+        return schemas.Strategy(built_at=datetime.now(timezone.utc), entries=entries)
+
+    # Fallback: legacy risk-matrix path.
     for risk_entry in risk.entries:
         pack = list(_DEFAULT_PACKS.get(risk_entry.capability, ["api"]))
-        # Add UI and accessibility for very high-risk surfaces if not present.
         if risk_entry.score >= 25.0 and "ui" not in pack:
             pack.append("ui")
         if risk_entry.score >= 30.0 and "accessibility" not in pack:
             pack.append("accessibility")
-        # Drop anything outside the allowlist.
         pack = [c for c in pack if c in allowed]
         priority = _bucket_priority(risk_entry.score)
         entries.append(
@@ -70,8 +103,37 @@ def build_baseline_strategy(
             )
         )
 
-    log.info("strategy: baseline produced %d entries", len(entries))
+    log.info("strategy: baseline produced %d entries (legacy path)", len(entries))
     return schemas.Strategy(built_at=datetime.now(timezone.utc), entries=entries)
+
+
+def _pack_for_cluster(
+    cap: schemas.DiscoveredCapability,
+    score: float,
+    allowed: set[str],
+) -> list[str]:
+    """Pick categories for a clustered capability.
+
+    Rules:
+      * Always include `api` when route_count > 0.
+      * Include `ui` and `accessibility` when ui_count > 0.
+      * Include `security` for any high-risk surface (score >= 20)
+        — these are the clusters most likely to expose authz/PII gaps.
+      * Include `performance` when route_count >= 10 (the cluster is
+        broad enough that latency matters).
+    """
+    pack: list[str] = []
+    if cap.route_count > 0:
+        pack.append("api")
+    if cap.ui_count > 0:
+        pack.append("ui")
+        if score >= 20.0:
+            pack.append("accessibility")
+    if score >= 20.0:
+        pack.append("security")
+    if cap.route_count >= 10:
+        pack.append("performance")
+    return [c for c in pack if c in allowed]
 
 
 def validate_llm_strategy(

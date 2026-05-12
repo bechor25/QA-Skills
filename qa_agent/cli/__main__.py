@@ -19,6 +19,7 @@ from .. import __version__
 from ..shared.logging import get_logger
 from .commands import (
     analyze,
+    build_strategy,
     full_run,
     prepare,
     rerun,
@@ -57,6 +58,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_prep.add_argument("--project", default=None)
     p_prep.set_defaults(func=prepare.run)
+
+    p_bs = sub.add_parser(
+        "build-strategy",
+        help="Rebuild strategy.json from the refined capability_map.json "
+             "(falls back to raw_capability_map.json or the legacy risk-matrix path).",
+    )
+    p_bs.add_argument("--project", default=None)
+    p_bs.set_defaults(func=build_strategy.run)
 
     p_scaf = sub.add_parser(
         "scaffold",

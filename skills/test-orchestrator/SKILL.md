@@ -56,33 +56,71 @@ invoke it through that path so the venv bootstrap fires on first use.
 
 ## Pipeline phases
 
-10 phases. CLI phases are pure-Python; AGENT phases require you to
+12 phases. CLI phases are pure-Python; AGENT phases require you to
 dispatch sub-agents.
 
-| # | Phase            | Owner | Output state file                          |
-|---|------------------|-------|---------------------------------------------|
-| 1 | scan             | CLI   | `project_map.json`, `dependency_graph.json` |
-| 2 | analyze          | CLI   | `knowledge_graph.json`, `risk_matrix.json`  |
-| 3 | strategy         | CLI   | `strategy.json`                             |
-| 4 | enrich           | AGENT | `contracts/<capability>.json`               |
-| 5 | author-scenarios | AGENT | `scenarios/<capability>.json`               |
-| 6 | scaffold         | CLI   | scaffolded test files + `generated_tests.json` |
-| 7 | author-bodies    | AGENT | test files filled in place                  |
-| 8 | run              | CLI   | `execution_history.json` + logs             |
-| 9 | triage           | AGENT | `critique/<test_id>.json`                   |
-| 10| report           | CLI   | `report.html`                               |
+| #  | Phase                | Owner | Output state file                          |
+|----|----------------------|-------|---------------------------------------------|
+| 1  | scan                 | CLI   | `project_map.json`, `dependency_graph.json` |
+| 2  | analyze              | CLI   | `knowledge_graph.json`, `risk_matrix.json`  |
+| 3a | cluster-capabilities | CLI   | `raw_capability_map.json`                   |
+| 3b | refine-capabilities  | AGENT | `capability_map.json`                       |
+| 3c | build-strategy       | CLI   | `strategy.json`                             |
+| 4  | enrich               | AGENT | `contracts/<capability>.json`               |
+| 5  | author-scenarios     | AGENT | `scenarios/<capability>.json`               |
+| 6  | scaffold             | CLI   | scaffolded test files + `generated_tests.json` |
+| 7  | author-bodies        | AGENT | test files filled in place                  |
+| 8  | run                  | CLI   | `execution_history.json` + logs             |
+| 9  | triage               | AGENT | `critique/<test_id>.json`                   |
+| 10 | report               | CLI   | `report.html`                               |
 
 ## Step-by-step
 
-### Phases 1–3 (CLI)
+### Phases 1–3a (CLI)
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" prepare --project "${PROJECT_ROOT}"
 ```
 
 First call may take 20–40 s for venv bootstrap. After it returns,
-read `${PROJECT_ROOT}/.qa-agent/state/strategy.json` to learn the
-capability list.
+`state/raw_capability_map.json` exists with deterministic clusters
+keyed by URL prefix and UI directory.
+
+### Phase 3b — refine capabilities (AGENT, **single** call)
+
+Spawn **one** `Agent` call to clean the raw capability map. Each call:
+
+- `subagent_type`: `qa-capability-mapper`.
+- `description`: `"refine capabilities"`.
+- `prompt`:
+  > Project root: `${PROJECT_ROOT}`. Read
+  > `state/raw_capability_map.json` and
+  > `state/knowledge_graph.json` (project_summary +
+  > features[].name/summary only). Merge near-duplicate clusters,
+  > rename URL-stem clusters using the human terms in the KG, drop
+  > obvious noise (favicon, robots), and emit
+  > `state/capability_map.json` per the qa-capability-mapper schema.
+  > Stay within the state directory. Source must be "mapper-agent".
+
+Wait for that single sub-agent to return before the next CLI step.
+There is no fan-out here — only one mapper-agent per pipeline run.
+
+### Phase 3c — build strategy (CLI)
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" build-strategy --project "${PROJECT_ROOT}"
+```
+
+Reads `state/capability_map.json` and rewrites `state/strategy.json`
+with one entry per refined capability (each capability now carries
+concrete `route_globs` and `ui_globs`).
+
+Read the new `state/strategy.json` and the corresponding
+`capability_map.json` to learn:
+
+- Which capabilities exist (this is your fan-out width).
+- For each capability, its `route_globs` and `ui_globs` (you will
+  forward these in the enricher prompt).
 
 ### Phase 4 — enrich (AGENT, fan-out per capability)
 
@@ -92,20 +130,19 @@ capability. Each call:
 - `subagent_type`: `qa-enricher` (or `qa-skills:qa-enricher` if the
   harness reports the namespaced form).
 - `description`: e.g. `"enrich <capability>"` (3–5 words).
-- `prompt`:
+- `prompt` (substitute the capability-specific values):
   > Capability: `<capability>`. Project root: `${PROJECT_ROOT}`.
-  > Read `state/strategy.json` (your entry), the backend handler
-  > files for this capability, **and** the frontend page/route files
-  > for this capability under `apps/web/`, `apps/client/`,
-  > `apps/frontend/`, `src/pages/`, `src/app/`, `src/routes/` —
-  > whichever exist. Emit JSON to
+  > route_globs: `<comma-separated globs from capability_map>`.
+  > ui_globs: `<comma-separated globs from capability_map>`.
+  > Glob each pattern, read the matching handler/page files (max 10
+  > per side, 3000 lines per side), and emit
   > `state/contracts/<capability>.json` per the qa-enricher schema:
   > `endpoints[]` (method, path, module_path, auth_required, request,
   > response_2xx, response_4xx, side_effects, related_files) **and**
   > `ui_entry_points[]` (route, file, needs_auth, primary_actions)
-  > for every UI surface that maps to this capability. Leaving
-  > `ui_entry_points` empty for a capability with an obvious UI is a
-  > contract bug — re-scan the frontend roots before giving up.
+  > for every UI surface inside `ui_globs`. Do not read files outside
+  > the supplied globs. If both glob sets are empty, emit an empty
+  > contract with `notes` explaining the gap.
 
 After all sub-agents return:
 
@@ -113,8 +150,8 @@ After all sub-agents return:
   just that capability.
 - For any capability whose `strategy.json` entry includes `ui` or
   `accessibility`, verify `ui_entry_points` is non-empty. Empty →
-  re-dispatch `qa-enricher` for that capability with a stronger
-  frontend-scan hint.
+  re-dispatch `qa-enricher` for that capability — but tighten
+  `ui_globs` rather than asking the sub-agent to widen its scan.
 
 ### Phase 5 — author scenarios (AGENT, fan-out per capability)
 

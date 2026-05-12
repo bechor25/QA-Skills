@@ -35,6 +35,8 @@ _FILES = {
     schemas.UISelectorMap: "ui_selectors.json",
     schemas.TestDataPlan: "test_data_plan.json",
     schemas.RetryBudgetState: "retry_budget.json",
+    schemas.RawCapabilityMap: "raw_capability_map.json",
+    schemas.CapabilityMap: "capability_map.json",
 }
 
 
@@ -139,6 +141,10 @@ class StateManager:
             return model(built_at=now)  # type: ignore[return-value]
         if model is schemas.RetryBudgetState:
             return model()  # type: ignore[return-value]
+        if model is schemas.RawCapabilityMap:
+            return model(built_at=now)  # type: ignore[return-value]
+        if model is schemas.CapabilityMap:
+            return model(built_at=now)  # type: ignore[return-value]
         raise StateError(f"no default for model {model.__name__}")
 
     # ---- sharded state (per-capability / per-test) ----

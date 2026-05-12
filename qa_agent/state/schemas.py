@@ -465,3 +465,36 @@ class RetryBudgetState(BaseModel):
     schema_version: int = 1
     max_attempts: int = 2
     entries: list[RetryEntry] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# capability_map.json (CLI-built clustering of routes/pages into
+# project-specific capabilities) + raw_capability_map.json (the
+# pre-refinement version emitted by the deterministic clusterer).
+# ----------------------------------------------------------------------
+
+class DiscoveredCapability(BaseModel):
+    name: str
+    summary: str = ""
+    route_globs: list[str] = Field(default_factory=list)
+    ui_globs: list[str] = Field(default_factory=list)
+    route_count: int = 0
+    ui_count: int = 0
+    sample_routes: list[str] = Field(default_factory=list)
+    sample_ui_files: list[str] = Field(default_factory=list)
+    score_hint: float = 0.0
+
+
+class CapabilityMap(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    source: Literal["clusterer", "mapper-agent"] = "clusterer"
+    capabilities: list[DiscoveredCapability] = Field(default_factory=list)
+
+
+class RawCapabilityMap(BaseModel):
+    """Same shape as CapabilityMap but emitted by the deterministic
+    clusterer before the optional refinement sub-agent runs."""
+    schema_version: int = 1
+    built_at: datetime
+    capabilities: list[DiscoveredCapability] = Field(default_factory=list)

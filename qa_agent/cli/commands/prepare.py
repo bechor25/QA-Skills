@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import argparse
 
+from ...quality.capability_discovery import discover_capabilities
 from ...runtime.test_data import detect_test_data_plan
+from ...scanners.api_scanner import scan_api
+from ...scanners.ui_scanner import scan_ui
 from ...scanners.ui_selectors import scan_ui_selectors
 from ...shared.logging import get_logger
 from ...shared.paths import project_root
@@ -31,6 +34,13 @@ def run(args: argparse.Namespace) -> int:
 
     pm = sm.project_map()
     kg = sm.knowledge_graph()
+
+    api = scan_api(project, pm)
+    ui = scan_ui(project, pm)
+    raw_caps = discover_capabilities(root, pm, api, ui)
+    sm.save(raw_caps)
+    log.info("prepare: raw_capability_map saved (%d clusters)",
+             len(raw_caps.capabilities))
 
     selectors = scan_ui_selectors(root, pm, kg)
     sm.save(selectors)
