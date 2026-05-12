@@ -17,7 +17,17 @@ from typing import Sequence
 
 from .. import __version__
 from ..shared.logging import get_logger
-from .commands import analyze, full_run, rerun, report, state
+from .commands import (
+    analyze,
+    full_run,
+    prepare,
+    rerun,
+    report,
+    retry_decide,
+    run_tests,
+    scaffold,
+    state,
+)
 
 log = get_logger("qa_agent.cli")
 
@@ -39,6 +49,38 @@ def _build_parser() -> argparse.ArgumentParser:
     p_analyze = sub.add_parser("analyze", help="Scan and build the knowledge graph only.")
     p_analyze.add_argument("--project", default=None)
     p_analyze.set_defaults(func=analyze.run)
+
+    p_prep = sub.add_parser(
+        "prepare",
+        help="Phases 1-3: analyze + UI selectors + test-data plan. "
+             "After it returns, qa-master fans out qa-enricher per capability.",
+    )
+    p_prep.add_argument("--project", default=None)
+    p_prep.set_defaults(func=prepare.run)
+
+    p_scaf = sub.add_parser(
+        "scaffold",
+        help="Phase 6: emit scaffolded test files (it.todo stubs) from scenarios shards.",
+    )
+    p_scaf.add_argument("--project", default=None)
+    p_scaf.set_defaults(func=scaffold.run)
+
+    p_run = sub.add_parser(
+        "run-tests",
+        help="Phase 8: execute the generated suite. Skip install with --skip-install.",
+    )
+    p_run.add_argument("--project", default=None)
+    p_run.add_argument("--skip-install", action="store_true")
+    p_run.add_argument("--timeout", type=int, default=300)
+    p_run.set_defaults(func=run_tests.run)
+
+    p_dec = sub.add_parser(
+        "retry-decide",
+        help="Emit JSON retry decisions after triage. Used by qa-master to "
+             "know which failing tests to re-run.",
+    )
+    p_dec.add_argument("--project", default=None)
+    p_dec.set_defaults(func=retry_decide.run)
 
     p_rerun = sub.add_parser("rerun", help="Re-execute a previously generated suite.")
     p_rerun.add_argument("--project", default=None)

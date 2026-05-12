@@ -67,3 +67,8 @@ def latest_run(project: str | Path | None = None) -> Workspace | None:
 def _make_run_id() -> str:
     now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{now}-{uuid.uuid4().hex[:6]}"
+
+
+def latest_run_id(project: str | Path | None = None) -> str | None:
+    ws = latest_run(project)
+    return ws.run_id if ws else None

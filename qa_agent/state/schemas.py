@@ -271,3 +271,197 @@ class FlakyEntry(BaseModel):
 class FlakyState(BaseModel):
     schema_version: int = 1
     entries: list[FlakyEntry] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# contracts/<capability>.json  (sharded — one file per capability)
+# Authored by the qa-enricher sub-agent.
+# ----------------------------------------------------------------------
+
+class ContractHeader(BaseModel):
+    name: str
+    value: str = ""
+    note: str = ""
+
+
+class ContractParam(BaseModel):
+    name: str
+    location: Literal["query", "path", "cookie"]
+    required: bool = False
+    schema_: dict = Field(default_factory=dict, alias="schema")
+    example: object | None = None
+
+    class Config:
+        populate_by_name = True
+
+
+class ContractRequest(BaseModel):
+    headers: list[ContractHeader] = Field(default_factory=list)
+    body_schema: dict = Field(default_factory=dict)
+    query: list[ContractParam] = Field(default_factory=list)
+    path_params: list[ContractParam] = Field(default_factory=list)
+
+
+class ContractResponse(BaseModel):
+    status_examples: list[int] = Field(default_factory=list)
+    body_schema: dict = Field(default_factory=dict)
+    headers: list[ContractHeader] = Field(default_factory=list)
+
+
+class ContractEndpoint(BaseModel):
+    method: str
+    path: str
+    module_path: str = ""
+    auth_required: bool = False
+    request: ContractRequest = Field(default_factory=ContractRequest)
+    response_2xx: ContractResponse = Field(default_factory=ContractResponse)
+    response_4xx: ContractResponse = Field(default_factory=ContractResponse)
+    side_effects: list[str] = Field(default_factory=list)
+    related_files: list[str] = Field(default_factory=list)
+
+
+class ContractUIEntry(BaseModel):
+    route: str
+    file: str = ""
+    needs_auth: bool = False
+    primary_actions: list[str] = Field(default_factory=list)
+
+
+class Contract(BaseModel):
+    schema_version: int = 1
+    capability: str
+    built_at: datetime
+    endpoints: list[ContractEndpoint] = Field(default_factory=list)
+    ui_entry_points: list[ContractUIEntry] = Field(default_factory=list)
+    notes: str = ""
+
+
+# ----------------------------------------------------------------------
+# scenarios/<capability>.json  (sharded — one file per capability)
+# Authored by the qa-scenario-author sub-agent. Richer than the legacy
+# top-level scenarios.json which only carried Given/When/Then prose.
+# ----------------------------------------------------------------------
+
+class ScenarioRequest(BaseModel):
+    method: str = ""
+    path: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: object | None = None
+    query: dict[str, str] = Field(default_factory=dict)
+
+
+class ScenarioExpected(BaseModel):
+    status: int | None = None
+    body_shape: dict = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
+    side_effects: list[str] = Field(default_factory=list)
+
+
+class RichScenario(BaseModel):
+    id: str
+    capability: str
+    category: str
+    severity: Literal["smoke", "negative", "security", "a11y", "perf", "edge"] = "smoke"
+    title: str
+    endpoint_ref: dict = Field(default_factory=dict)
+    preconditions: list[str] = Field(default_factory=list)
+    request: ScenarioRequest = Field(default_factory=ScenarioRequest)
+    expected: ScenarioExpected = Field(default_factory=ScenarioExpected)
+    steps: list[ScenarioStep] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class CapabilityScenarios(BaseModel):
+    schema_version: int = 1
+    capability: str
+    built_at: datetime
+    scenarios: list[RichScenario] = Field(default_factory=list)
+    notes: str = ""
+
+
+# ----------------------------------------------------------------------
+# ui_selectors.json  (single file, capability-keyed)
+# Produced by scanners.ui_selectors during the CLI scaffold phase.
+# ----------------------------------------------------------------------
+
+class UISelector(BaseModel):
+    selector: str
+    role: str = ""
+    label: str = ""
+    file: str = ""
+    line: int | None = None
+    context: str = ""
+
+
+class UISelectorMap(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    by_capability: dict[str, list[UISelector]] = Field(default_factory=dict)
+
+
+# ----------------------------------------------------------------------
+# critique/<test_id>.json  (sharded — one file per failing test)
+# Authored by the qa-triage sub-agent.
+# ----------------------------------------------------------------------
+
+class TriageEvidence(BaseModel):
+    expected_per_contract: str = ""
+    actual_request: dict = Field(default_factory=dict)
+    actual_response: dict = Field(default_factory=dict)
+    code_location_at_fault: str = ""
+
+
+class TriageAction(BaseModel):
+    type: Literal["edit_test", "report_bug", "retry_only", "halt"] = "retry_only"
+    diff: str = ""
+    rationale: str = ""
+    summary: str = ""
+
+
+class TriageVerdict(BaseModel):
+    schema_version: int = 1
+    test_id: str
+    test_path: str = ""
+    verdict: Literal["test-bug", "prod-bug", "flaky", "infra"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: TriageEvidence = Field(default_factory=TriageEvidence)
+    action: TriageAction = Field(default_factory=TriageAction)
+    built_at: datetime
+
+
+# ----------------------------------------------------------------------
+# test_data_plan.json  (single file)
+# Emitted by runtime.test_data based on the detected ORM. Tells the
+# scaffolder which fixture/teardown helper to import.
+# ----------------------------------------------------------------------
+
+class TestDataPlan(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    orm: Literal["prisma", "typeorm", "sequelize", "drizzle", "mongoose",
+                 "sqlalchemy", "django-orm", "tortoise", "none"] = "none"
+    strategy: Literal["transactional", "truncate", "container", "api-fixtures", "none"] = "none"
+    helper_import: str = ""           # e.g. "import { useFixture } from '../helpers/fixtures'"
+    setup_call: str = ""              # e.g. "await fixtures.reset()"
+    teardown_call: str = ""           # e.g. "await fixtures.rollback()"
+    notes: str = ""
+
+
+# ----------------------------------------------------------------------
+# retry_budget.json  (single file)
+# Tracks per-test attempt counts and frozen verdicts so the orchestrator
+# never exceeds the configured budget or retries a prod-bug.
+# ----------------------------------------------------------------------
+
+class RetryEntry(BaseModel):
+    test_id: str
+    attempts: int = 0
+    frozen_verdict: Literal["test-bug", "prod-bug", "flaky", "infra", ""] = ""
+    last_run_id: str = ""
+    last_seen: datetime
+
+
+class RetryBudgetState(BaseModel):
+    schema_version: int = 1
+    max_attempts: int = 2
+    entries: list[RetryEntry] = Field(default_factory=list)

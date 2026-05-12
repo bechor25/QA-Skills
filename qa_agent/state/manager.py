@@ -32,6 +32,9 @@ _FILES = {
     schemas.ExecutionHistory: "execution_history.json",
     schemas.InstallationHistory: "installation_history.json",
     schemas.FlakyState: "flaky_state.json",
+    schemas.UISelectorMap: "ui_selectors.json",
+    schemas.TestDataPlan: "test_data_plan.json",
+    schemas.RetryBudgetState: "retry_budget.json",
 }
 
 
@@ -130,4 +133,84 @@ class StateManager:
             return model(built_at=now)  # type: ignore[return-value]
         if model is schemas.Critique:
             return model(built_at=now)  # type: ignore[return-value]
+        if model is schemas.UISelectorMap:
+            return model(built_at=now)  # type: ignore[return-value]
+        if model is schemas.TestDataPlan:
+            return model(built_at=now)  # type: ignore[return-value]
+        if model is schemas.RetryBudgetState:
+            return model()  # type: ignore[return-value]
         raise StateError(f"no default for model {model.__name__}")
+
+    # ---- sharded state (per-capability / per-test) ----
+
+    def _shard_dir(self, name: str) -> Path:
+        path = self.dir / name
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def contract_path(self, capability: str) -> Path:
+        return self._shard_dir("contracts") / f"{capability}.json"
+
+    def load_contract(self, capability: str) -> schemas.Contract | None:
+        path = self.contract_path(capability)
+        raw = read_json_or(path, None)
+        if raw is None:
+            return None
+        try:
+            return schemas.Contract.model_validate(raw)
+        except ValidationError as e:
+            raise StateError(f"contract invalid: {path}: {e}") from e
+
+    def save_contract(self, contract: schemas.Contract) -> Path:
+        path = self.contract_path(contract.capability)
+        write_json(path, contract.model_dump(mode="json"))
+        return path
+
+    def list_contract_capabilities(self) -> list[str]:
+        d = self.dir / "contracts"
+        if not d.exists():
+            return []
+        return sorted(p.stem for p in d.glob("*.json"))
+
+    def scenarios_shard_path(self, capability: str) -> Path:
+        return self._shard_dir("scenarios") / f"{capability}.json"
+
+    def load_capability_scenarios(self, capability: str) -> schemas.CapabilityScenarios | None:
+        path = self.scenarios_shard_path(capability)
+        raw = read_json_or(path, None)
+        if raw is None:
+            return None
+        try:
+            return schemas.CapabilityScenarios.model_validate(raw)
+        except ValidationError as e:
+            raise StateError(f"scenarios shard invalid: {path}: {e}") from e
+
+    def save_capability_scenarios(self, scenarios: schemas.CapabilityScenarios) -> Path:
+        path = self.scenarios_shard_path(scenarios.capability)
+        write_json(path, scenarios.model_dump(mode="json"))
+        return path
+
+    def list_scenario_capabilities(self) -> list[str]:
+        d = self.dir / "scenarios"
+        if not d.exists():
+            return []
+        return sorted(p.stem for p in d.glob("*.json"))
+
+    def triage_path(self, test_id: str) -> Path:
+        safe = test_id.replace("/", "_").replace("::", "__")
+        return self._shard_dir("critique") / f"{safe}.json"
+
+    def load_triage(self, test_id: str) -> schemas.TriageVerdict | None:
+        path = self.triage_path(test_id)
+        raw = read_json_or(path, None)
+        if raw is None:
+            return None
+        try:
+            return schemas.TriageVerdict.model_validate(raw)
+        except ValidationError as e:
+            raise StateError(f"triage verdict invalid: {path}: {e}") from e
+
+    def save_triage(self, verdict: schemas.TriageVerdict) -> Path:
+        path = self.triage_path(verdict.test_id)
+        write_json(path, verdict.model_dump(mode="json"))
+        return path
