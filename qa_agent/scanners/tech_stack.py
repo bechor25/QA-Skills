@@ -179,19 +179,142 @@ def scan_tech_stack(project: str | Path | None, pm: schemas.ProjectMap) -> schem
 
 
 def _read_npm_deps(root: Path) -> dict[str, str]:
-    p = root / "package.json"
-    if not p.exists():
-        return {}
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    deps = {}
-    for key in ("dependencies", "devDependencies", "peerDependencies"):
-        section = data.get(key) or {}
-        if isinstance(section, dict):
-            deps.update(section)
+    """Return merged dependency map across root + all workspace
+    package.json files.
+
+    Detects workspaces from (in order):
+      * `package.json` ``workspaces`` field (npm/yarn) — array of globs
+        or ``{packages: [...]}`` object;
+      * ``pnpm-workspace.yaml`` ``packages:`` list (pnpm);
+      * ``lerna.json`` ``packages`` field (lerna).
+
+    Falls back to the root ``package.json`` only when nothing else is
+    declared. Monorepos benefit; flat single-package repos behave
+    exactly as before.
+    """
+    deps: dict[str, str] = {}
+    visited: set[Path] = set()
+
+    root_pkg = root / "package.json"
+    root_data = _read_json_safe(root_pkg)
+    if root_data is not None:
+        _merge_deps(deps, root_data)
+        visited.add(root_pkg.resolve())
+
+    globs = _discover_npm_workspace_globs(root, root_data)
+    for glob in globs:
+        for candidate in _expand_workspace_glob(root, glob):
+            pkg = candidate / "package.json"
+            if not pkg.exists():
+                continue
+            real = pkg.resolve()
+            if real in visited:
+                continue
+            visited.add(real)
+            data = _read_json_safe(pkg)
+            if data is not None:
+                _merge_deps(deps, data)
     return deps
+
+
+def _read_json_safe(p: Path) -> dict | None:
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _merge_deps(into: dict[str, str], pkg_data: dict) -> None:
+    for key in ("dependencies", "devDependencies", "peerDependencies"):
+        section = pkg_data.get(key) or {}
+        if isinstance(section, dict):
+            for name, version in section.items():
+                # First write wins so root deps take precedence over
+                # workspace re-pinning, but missing names get filled
+                # from workspaces. Either way every present package
+                # is captured.
+                into.setdefault(name, version)
+
+
+def _discover_npm_workspace_globs(root: Path, root_pkg: dict | None) -> list[str]:
+    globs: list[str] = []
+
+    if root_pkg is not None:
+        ws = root_pkg.get("workspaces")
+        if isinstance(ws, list):
+            globs.extend(str(x) for x in ws if isinstance(x, str))
+        elif isinstance(ws, dict):
+            packages = ws.get("packages")
+            if isinstance(packages, list):
+                globs.extend(str(x) for x in packages if isinstance(x, str))
+
+    pnpm_ws = root / "pnpm-workspace.yaml"
+    if pnpm_ws.exists():
+        globs.extend(_parse_pnpm_workspace(pnpm_ws))
+
+    lerna = _read_json_safe(root / "lerna.json")
+    if lerna and isinstance(lerna.get("packages"), list):
+        globs.extend(str(x) for x in lerna["packages"] if isinstance(x, str))
+
+    # de-dupe while keeping order
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for g in globs:
+        if g not in seen:
+            seen.add(g)
+            deduped.append(g)
+    return deduped
+
+
+def _parse_pnpm_workspace(p: Path) -> list[str]:
+    """Tiny YAML parser for pnpm-workspace.yaml ``packages:`` list.
+
+    Handles the only shape pnpm produces: a top-level ``packages:`` key
+    followed by a list of quoted-or-unquoted glob strings. Avoids a
+    PyYAML dependency.
+    """
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    out: list[str] = []
+    in_packages = False
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line or line.lstrip().startswith("#"):
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith("packages:"):
+            in_packages = True
+            continue
+        # Any non-indented key ends the block.
+        if in_packages and not line.startswith((" ", "\t", "-")):
+            in_packages = False
+        if in_packages and stripped.startswith("-"):
+            value = stripped[1:].strip().strip("'").strip('"')
+            if value:
+                out.append(value)
+    return out
+
+
+def _expand_workspace_glob(root: Path, glob: str) -> list[Path]:
+    """Expand a workspace glob (e.g. ``apps/*``, ``packages/*/sub``).
+
+    Only directory results are returned. Globs starting with ``!`` are
+    treated as negations and skipped (pnpm convention); they are rare
+    in practice and not worth re-implementing here.
+    """
+    if not glob or glob.startswith("!"):
+        return []
+    # Strip trailing /** so Path.glob picks up the directory itself.
+    pattern = glob.rstrip("/")
+    try:
+        matches = sorted(root.glob(pattern))
+    except (OSError, ValueError):
+        return []
+    return [m for m in matches if m.is_dir()]
 
 
 def _read_py_deps(root: Path) -> set[str]:

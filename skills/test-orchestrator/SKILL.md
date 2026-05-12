@@ -172,22 +172,39 @@ capability with `subagent_type=qa-scenario-author`. Prompt body:
 "${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" scaffold --project "${PROJECT_ROOT}"
 ```
 
-Emits one scaffolded test file per scenario, populates
-`generated_tests.json`.
+Emits **one file per `(capability, category)` pair**, each holding
+multiple stubs (one per scenario). Path shape:
+`tests/qa-agent/<category>/<capability>.{spec.ts|py}`. Each stub
+appears inside the file as a line matching
+``QA-AGENT-BODY :: <scenario_id> :: <title>`` — that is the lookup
+key the body author uses. `generated_tests.json` maps every scenario
+to the same file path; multiple body-author batches will edit the
+same file in parallel.
 
-### Phase 7 — author bodies (AGENT, batched per capability+category)
+### Phase 7 — author bodies (AGENT, fully parallel fan-out)
 
-Group scenarios by `(capability, category)`. Each batch = up to 5
-scenarios for the same pair. Dispatch **up to 5 batches concurrently**
-per assistant message; once they return, dispatch the next 5.
+Group every scenario by `(capability, category)`. Within each group,
+chunk into batches of **up to 5 scenarios**. Dispatch **all** batches
+in **one assistant message** so the runtime executes them
+concurrently — including batches that target the same file (body
+author is required to leave sibling stubs untouched, so concurrent
+edits on different scenario_ids do not collide).
 
 **You must dispatch a body-author batch for every `(capability,
 category)` pair that has at least one scenario** — `api`, `security`,
 `ui`, `accessibility`, `performance`, `regression`. Skipping a
 category because its scaffold looks unusual (Playwright
 `test.fixme(true, …)` vs jest `it.todo(…)`) is a contract violation;
-all three stub forms (`it.todo`, `test.fixme(true, …)`,
-`pytest.skip(…)`) are equivalent.
+all three stub forms (`it.todo("QA-AGENT-BODY :: …")`,
+`test("QA-AGENT-BODY :: …", … test.fixme(true, …))`,
+`pytest.skip("QA-AGENT-BODY :: …")`) are equivalent.
+
+Concretely: if the strategy yields 11 capabilities × 5 categories
+with up to 5 scenarios per batch, you may end up dispatching ~30-50
+sub-agents in a single message. That is correct. **Sequential dispatch
+(wave of 5, wait, wave of 5, …) is a contract violation** — it was
+the bottleneck that caused past runs to finish only ~20% of bodies
+before timing out.
 
 Prompt body for `qa-body-author`:
 
@@ -196,16 +213,18 @@ Prompt body for `qa-body-author`:
 > Project root: `${PROJECT_ROOT}`.
 > Read `state/contracts/<capability>.json`,
 > `state/scenarios/<capability>.json`, `state/generated_tests.json`
-> (for scaffold paths); for ui/accessibility also
-> `state/ui_selectors.json`. For each scenario, open the scaffolded
-> file, find the `QA-AGENT-BODY` stub (any of `it.todo` /
-> `test.fixme(true, …)` / `pytest.skip(…)`), replace with a real body
-> using the contract for headers/payload/assertions. AAA, no shared
-> mutable state, clear names. Stay inside `tests/qa-agent/`.
+> (for the scaffold file path — every scenario in this batch shares
+> the same path); for ui/accessibility also `state/ui_selectors.json`.
+> For each `scenario_id`, find the line containing
+> `QA-AGENT-BODY :: <scenario_id> ::` and replace that single stub
+> with a real body using the contract for headers/payload/assertions.
+> Leave sibling stubs (other scenario_ids in the same file) **alone**
+> — other batches will fill them concurrently. AAA structure, no
+> shared mutable state, clear names. Stay inside `tests/qa-agent/`.
 
 ### Phase 7 verification gate — required before phase 8
 
-After every batch returns and again after the whole phase is done:
+After the fan-out returns, run:
 
 ```bash
 grep -rln "QA-AGENT-BODY" "${PROJECT_ROOT}/tests/qa-agent/" 2>/dev/null \
@@ -213,15 +232,18 @@ grep -rln "QA-AGENT-BODY" "${PROJECT_ROOT}/tests/qa-agent/" 2>/dev/null \
 ```
 
 - `all bodies authored` → proceed to phase 8.
-- Any file path printed → that scaffold is still a stub. Look up its
-  `scenario_id` in `state/generated_tests.json`; re-dispatch
-  `qa-body-author` for that one scenario. Do not call phase 8 while
-  any `QA-AGENT-BODY` remains — the runner will skip those tests and
-  inflate the apparent skip count.
+- Any file path printed → look up the surviving
+  `QA-AGENT-BODY :: <scenario_id>` markers inside those files and
+  cross-reference each `scenario_id` with
+  `state/generated_tests.json`. Group the missing ids back by
+  `(capability, category)` and dispatch a follow-up fan-out **in one
+  message** for them. Do not call phase 8 while any
+  `QA-AGENT-BODY ::` line remains — the runner will skip those
+  tests and inflate the apparent skip count.
 
 This gate is not optional. Past runs silently left ui/accessibility
-scaffolds unfilled when the body-author missed the `test.fixme(true)`
-stub form.
+scaffolds unfilled when the body-author missed an unfamiliar stub
+form.
 
 ### Phase 8 — run tests (CLI)
 
@@ -327,12 +349,18 @@ ambiguous, otherwise default to `changed`.
 
 ## Output style
 
-When the pipeline finishes, surface to the user:
+When the pipeline finishes, surface to the user **in Hebrew**:
 
-- Lead with the verdict: quality score (0–100) + pass rate (%).
-- HTML report path on a single line, clickable.
-- Top 3 capabilities by risk (from `risk_matrix.json`).
-- Stop. No bullet-storms.
+- פתח עם הוורדיקט: ציון איכות (0–100) + אחוז העברה.
+- נתיב דוח ה-HTML בשורה אחת, לחיץ.
+- 3 ה-capabilities עם הסיכון הגבוה ביותר מתוך `risk_matrix.json`.
+- מספרי קבצי הטסט (סך־הכל / מולאו / נכשלו / דולגו) ומספרי כיסוי לפי
+  קטגוריה (api / ui / security / accessibility / performance).
+- עצור. בלי סופות bullets.
+
+הדוח עצמו (HTML + סיכום markdown) חייב להיכתב בעברית. שמות זיהוי
+טכניים (test ids, capability slugs, route patterns) ושורות לוג של
+ה-CLI נשארות באנגלית.
 
 ## First-run latency
 
