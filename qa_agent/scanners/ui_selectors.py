@@ -4,6 +4,13 @@ Walks the project's UI source files (React/Vue/Svelte/Angular) and
 captures stable selectors the body author can use without re-reading
 the codebase. Output: state/ui_selectors.json keyed by capability.
 
+Capability mapping reuses the shared keyword dictionary
+(`qa_agent.shared.capabilities`) so the same `/login` page resolves
+to `auth` here, in the KG, in the strategy, and in the contracts.
+The legacy path-segment heuristic was lossy — every page under a
+`Jobs/` folder ended up under capability `jobs` instead of being
+fanned out to the capabilities it actually serves.
+
 The scanner is intentionally regex-based: it must run in <2s even on
 large monorepos. Higher-fidelity parsing belongs in the body author
 sub-agent.
@@ -15,6 +22,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..shared.capabilities import classify_capabilities
 from ..state import schemas
 
 
@@ -30,12 +38,23 @@ _ARIA_LABEL_RE = re.compile(r"""aria-label\s*=\s*["']([^"']+)["']""")
 # Matches: id="x" — lower-fidelity, used only if no test-id present in file.
 _ID_RE = re.compile(r"""\sid\s*=\s*["']([a-zA-Z][\w-]{2,})["']""")
 
-_CAPABILITY_HINT_RE = re.compile(r"[/\\]")
 
+def scan_ui_selectors(
+    project_root: Path,
+    project_map: schemas.ProjectMap,
+    knowledge_graph: schemas.KnowledgeGraph | None = None,
+) -> schemas.UISelectorMap:
+    """Return a UISelectorMap built from project_map's UI files.
 
-def scan_ui_selectors(project_root: Path, project_map: schemas.ProjectMap) -> schemas.UISelectorMap:
-    """Return a UISelectorMap built from project_map's UI files."""
+    Each UI file's selectors are fanned out to **every** capability
+    that matches its path/content (multi-bucket assignment). When a
+    knowledge_graph is provided, file→capability mappings from KG
+    module→feature→capability take precedence; the shared keyword
+    classifier is the fallback.
+    """
     by_cap: dict[str, list[schemas.UISelector]] = {}
+
+    kg_index = _build_kg_capability_index(knowledge_graph) if knowledge_graph else {}
 
     for entry in project_map.files:
         rel = entry.path
@@ -51,9 +70,13 @@ def scan_ui_selectors(project_root: Path, project_map: schemas.ProjectMap) -> sc
         except OSError:
             continue
 
-        capability = _capability_from_path(rel)
-        bucket = by_cap.setdefault(capability, [])
-        bucket.extend(_extract(text, rel))
+        capabilities = _capabilities_for_file(rel, text, kg_index)
+        selectors = _extract(text, rel)
+        if not selectors:
+            continue
+        for cap in capabilities:
+            bucket = by_cap.setdefault(cap, [])
+            bucket.extend(selectors)
 
     # Cap per-capability list size to keep state files small. Stable
     # sort by selector for diffability.
@@ -62,6 +85,40 @@ def scan_ui_selectors(project_root: Path, project_map: schemas.ProjectMap) -> sc
         by_cap[cap] = _dedupe(sels)[:200]
 
     return schemas.UISelectorMap(built_at=datetime.now(timezone.utc), by_capability=by_cap)
+
+
+def _build_kg_capability_index(kg: schemas.KnowledgeGraph) -> dict[str, list[str]]:
+    """Return a `file_path → [capability, ...]` mapping derived from the KG.
+
+    The KG carries `feature.capabilities[]` and each feature lists
+    `module_ids[]`; modules carry `path`. Composing these gives a
+    direct mapping from any source file to the capabilities it serves.
+    """
+    feature_caps: dict[str, list[str]] = {f.id: list(f.capabilities) for f in kg.features}
+    out: dict[str, list[str]] = {}
+    for mod in kg.modules:
+        caps: list[str] = []
+        for fid in mod.features:
+            for cap in feature_caps.get(fid, []):
+                if cap not in caps:
+                    caps.append(cap)
+        if caps:
+            out[mod.path] = caps
+    return out
+
+
+def _capabilities_for_file(rel_path: str, text: str, kg_index: dict[str, list[str]]) -> list[str]:
+    """Pick capabilities for a UI file. KG hits first, keyword fallback."""
+    # 1. Exact KG match.
+    if rel_path in kg_index:
+        return kg_index[rel_path]
+    # 2. KG prefix match — the file lives under a directory the KG indexed.
+    for kg_path, caps in kg_index.items():
+        if rel_path.startswith(kg_path.rsplit("/", 1)[0] + "/") and kg_path != rel_path:
+            return caps
+    # 3. Shared keyword classifier on path + the first ~200 chars of text.
+    hint = rel_path + " " + (text[:200] if text else "")
+    return classify_capabilities(hint)
 
 
 def _extract(text: str, rel_path: str) -> list[schemas.UISelector]:
@@ -118,18 +175,3 @@ def _truncate(line: str, limit: int = 120) -> str:
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
-def _capability_from_path(rel: str) -> str:
-    """Heuristic: pick the first meaningful path segment as capability.
-
-    Examples:
-      apps/web/src/pages/Login.tsx -> login
-      apps/web/src/features/auth/LoginForm.tsx -> auth
-      apps/web/src/admin/Dashboard.tsx -> admin
-    """
-    segs = [s for s in _CAPABILITY_HINT_RE.split(rel) if s]
-    # Drop common scaffolding prefixes.
-    drop = {"apps", "src", "packages", "web", "client", "frontend", "ui", "pages", "features", "components", "views"}
-    for seg in segs[:-1]:  # skip the filename itself
-        if seg.lower() not in drop:
-            return seg.lower()
-    return "other"

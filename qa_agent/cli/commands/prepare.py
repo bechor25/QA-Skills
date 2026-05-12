@@ -30,8 +30,9 @@ def run(args: argparse.Namespace) -> int:
     sm = StateManager(project)
 
     pm = sm.project_map()
+    kg = sm.knowledge_graph()
 
-    selectors = scan_ui_selectors(root, pm)
+    selectors = scan_ui_selectors(root, pm, kg)
     sm.save(selectors)
     total = sum(len(v) for v in selectors.by_capability.values())
     log.info("prepare: ui_selectors saved (%d capabilities, %d selectors)",

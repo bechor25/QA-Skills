@@ -20,20 +20,7 @@ from .summarizer import summarize_modules, summarize_project
 log = get_logger("qa_agent.context.kg_builder")
 
 
-# Naming heuristics — substrings in route paths or handler names map to
-# a capability. Keep lowercase. Order matters only when two hits collide:
-# the first wins.
-_CAPABILITY_HINTS: list[tuple[str, list[str]]] = [
-    ("auth",       ["login", "logout", "signin", "signup", "register", "auth", "oauth", "session", "token"]),
-    ("payments",   ["payment", "charge", "invoice", "subscription", "checkout", "billing"]),
-    ("permissions",["permission", "role", "acl", "rbac", "grant", "revoke"]),
-    ("user-mgmt",  ["user", "profile", "account"]),
-    ("data-export",["export", "download", "report"]),
-    ("file-upload",["upload", "attachment", "media"]),
-    ("search",     ["search", "query", "find"]),
-    ("admin",      ["admin", "internal", "ops"]),
-    ("api-public", ["api/v1", "api/v2", "public"]),
-]
+from ..shared.capabilities import classify_capability as _classify_capability
 
 
 def build_knowledge_graph(
@@ -109,14 +96,6 @@ def _build_features(
             )
         )
     return out
-
-
-def _classify_capability(hint_str: str) -> str:
-    lower = hint_str.lower()
-    for cap, hints in _CAPABILITY_HINTS:
-        if any(h in lower for h in hints):
-            return cap
-    return "other"
 
 
 def _humanize(cap: str) -> str:
