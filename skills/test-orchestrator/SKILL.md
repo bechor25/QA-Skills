@@ -1,44 +1,304 @@
 ---
 name: test-orchestrator
-description: Entry point for a full QA run. Triggers on "run qa", "qa run", "full qa run", "generate tests", "generate tests for my project", "הרץ qa", "הרץ בדיקות", "צור בדיקות", "צור בדיקות לפרויקט שלי". Hands off to the qa-master agent which invokes the qa-skills-run wrapper and surfaces the HTML report.
+description: Drive a full QA pipeline on the current project — deterministic phases via the qa-agent CLI, LLM phases via direct fan-out to qa-enricher / qa-scenario-author / qa-body-author / qa-triage sub-agents in parallel. Triggers on "run qa", "qa run", "full qa run", "generate tests", "generate tests for my project", "הרץ qa", "הרץ בדיקות", "צור בדיקות", "צור בדיקות לפרויקט שלי".
 ---
 
 # test-orchestrator
 
-The user wants a full QA run. Hand off to the **qa-master** agent.
+You are the **orchestrator** for a full QA run. Drive the entire
+pipeline yourself — deterministic phases through the `qa-agent` CLI,
+LLM phases by **fanning out sub-agents in parallel via the `Agent`
+tool**. The qa-master agent that used to wrap this work is deprecated
+because Claude Code restricts recursive sub-agent dispatch: a
+sub-agent cannot spawn the qa-enricher / qa-scenario-author /
+qa-body-author / qa-triage sub-agents. Only the top-level Claude (you,
+running this skill) can.
 
-## What to do
+## Hard rules
 
-1. Resolve the project root (see qa-master's "Project root resolution"
-   section). Confirm with the user if ambiguous.
-2. Invoke the qa-master agent with the instruction:
-   > Run a full QA pipeline against `${PROJECT_ROOT}`. Use
-   > `${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run full-run`. When complete,
-   > surface the report path and the top 3 risks.
-3. After the agent finishes, ensure the user sees:
-   - Quality score (0–100)
-   - Pass rate (%)
-   - Path to the HTML report
-   - Top 3 capabilities by risk
+1. **You spawn the sub-agents directly.** Do not delegate to qa-master.
+   Use the `Agent` tool yourself with `subagent_type=qa-enricher` etc.
+2. **Fan-out, do not author.** For phases 4 / 5 / 7 / 9, spawn one
+   sub-agent per capability (or per failing test) — never write
+   contracts, scenarios, test bodies, or triage verdicts yourself in
+   this thread. The whole point of fan-out is context isolation per
+   slice; if you do the work here, context fills up and quality
+   collapses.
+3. **Parallel by default.** When you have N independent sub-tasks,
+   place N `Agent` tool calls **inside one assistant message** so the
+   runtime executes them in parallel. Sequential dispatch (one Agent
+   call, await result, then the next) is a contract violation.
+4. **No direct execution.** Shell commands you run for QA must be
+   `${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run ...` subcommands. Never
+   call `pytest`, `npm`, `pip`, `playwright`, or the bare `qa-agent`
+   binary.
+5. **State is truth.** State files under
+   `${PROJECT_ROOT}/.qa-agent/state/` are the canonical inputs and
+   outputs of every phase. Never re-scan or re-classify the project
+   yourself once the CLI has produced them.
+6. **Honest reports.** The HTML report and `report-data.json` are the
+   verdict. Surface them as-is — never restate quality scores with
+   different numbers.
 
-## Hard constraints
+## Project root resolution
 
-- Do **not** run `pytest`, `npm`, `pip`, or `playwright` directly from this
-  skill — go through the agent so all installs and runs are recorded in
-  `installation_history.json` / `execution_history.json`.
-- Do **not** invoke `qa-agent` directly; always go through
-  `${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run` so the plugin venv bootstrap
-  fires on first call.
-- Do **not** invent quality numbers. The HTML report is the verdict.
+Before invoking the CLI, set `PROJECT_ROOT`:
+
+1. If the user supplied an explicit path, use it.
+2. Else if `${PWD}` contains `package.json`, `pyproject.toml`,
+   `pom.xml`, `build.gradle`, or `go.mod` — use `${PWD}`.
+3. Else walk up parents until one of those files is found, max 5
+   levels.
+4. Else ask the user. Do not guess.
+
+The wrapper is at `${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run`. Always
+invoke it through that path so the venv bootstrap fires on first use.
+
+## Pipeline phases
+
+10 phases. CLI phases are pure-Python; AGENT phases require you to
+dispatch sub-agents.
+
+| # | Phase            | Owner | Output state file                          |
+|---|------------------|-------|---------------------------------------------|
+| 1 | scan             | CLI   | `project_map.json`, `dependency_graph.json` |
+| 2 | analyze          | CLI   | `knowledge_graph.json`, `risk_matrix.json`  |
+| 3 | strategy         | CLI   | `strategy.json`                             |
+| 4 | enrich           | AGENT | `contracts/<capability>.json`               |
+| 5 | author-scenarios | AGENT | `scenarios/<capability>.json`               |
+| 6 | scaffold         | CLI   | scaffolded test files + `generated_tests.json` |
+| 7 | author-bodies    | AGENT | test files filled in place                  |
+| 8 | run              | CLI   | `execution_history.json` + logs             |
+| 9 | triage           | AGENT | `critique/<test_id>.json`                   |
+| 10| report           | CLI   | `report.html`                               |
+
+## Step-by-step
+
+### Phases 1–3 (CLI)
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" prepare --project "${PROJECT_ROOT}"
+```
+
+First call may take 20–40 s for venv bootstrap. After it returns,
+read `${PROJECT_ROOT}/.qa-agent/state/strategy.json` to learn the
+capability list.
+
+### Phase 4 — enrich (AGENT, fan-out per capability)
+
+In a **single assistant message**, issue one `Agent` tool call per
+capability. Each call:
+
+- `subagent_type`: `qa-enricher` (or `qa-skills:qa-enricher` if the
+  harness reports the namespaced form).
+- `description`: e.g. `"enrich <capability>"` (3–5 words).
+- `prompt`:
+  > Capability: `<capability>`. Project root: `${PROJECT_ROOT}`.
+  > Read `state/strategy.json` (your entry), the backend handler
+  > files for this capability, **and** the frontend page/route files
+  > for this capability under `apps/web/`, `apps/client/`,
+  > `apps/frontend/`, `src/pages/`, `src/app/`, `src/routes/` —
+  > whichever exist. Emit JSON to
+  > `state/contracts/<capability>.json` per the qa-enricher schema:
+  > `endpoints[]` (method, path, module_path, auth_required, request,
+  > response_2xx, response_4xx, side_effects, related_files) **and**
+  > `ui_entry_points[]` (route, file, needs_auth, primary_actions)
+  > for every UI surface that maps to this capability. Leaving
+  > `ui_entry_points` empty for a capability with an obvious UI is a
+  > contract bug — re-scan the frontend roots before giving up.
+
+After all sub-agents return:
+
+- Verify each `state/contracts/<cap>.json` exists. Missing → re-dispatch
+  just that capability.
+- For any capability whose `strategy.json` entry includes `ui` or
+  `accessibility`, verify `ui_entry_points` is non-empty. Empty →
+  re-dispatch `qa-enricher` for that capability with a stronger
+  frontend-scan hint.
+
+### Phase 5 — author scenarios (AGENT, fan-out per capability)
+
+Same pattern as phase 4. One assistant message, one `Agent` call per
+capability with `subagent_type=qa-scenario-author`. Prompt body:
+
+> Capability: `<capability>`. Read `state/contracts/<capability>.json`,
+> the strategy entry, and `risk_matrix.json` for this capability.
+> Emit `state/scenarios/<capability>.json` per the qa-scenario-author
+> schema with scenarios in every category listed in
+> `strategy.json`. Use payload examples from the contract's request
+> schema. For ui / accessibility categories use
+> `ui_entry_points[].route`, never api paths.
+
+### Phase 6 — scaffold (CLI)
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" scaffold --project "${PROJECT_ROOT}"
+```
+
+Emits one scaffolded test file per scenario, populates
+`generated_tests.json`.
+
+### Phase 7 — author bodies (AGENT, batched per capability+category)
+
+Group scenarios by `(capability, category)`. Each batch = up to 5
+scenarios for the same pair. Dispatch **up to 5 batches concurrently**
+per assistant message; once they return, dispatch the next 5.
+
+**You must dispatch a body-author batch for every `(capability,
+category)` pair that has at least one scenario** — `api`, `security`,
+`ui`, `accessibility`, `performance`, `regression`. Skipping a
+category because its scaffold looks unusual (Playwright
+`test.fixme(true, …)` vs jest `it.todo(…)`) is a contract violation;
+all three stub forms (`it.todo`, `test.fixme(true, …)`,
+`pytest.skip(…)`) are equivalent.
+
+Prompt body for `qa-body-author`:
+
+> Category: `<category>`. Capability: `<capability>`.
+> Scenario IDs: `[<id1>, <id2>, …]` (≤5).
+> Project root: `${PROJECT_ROOT}`.
+> Read `state/contracts/<capability>.json`,
+> `state/scenarios/<capability>.json`, `state/generated_tests.json`
+> (for scaffold paths); for ui/accessibility also
+> `state/ui_selectors.json`. For each scenario, open the scaffolded
+> file, find the `QA-AGENT-BODY` stub (any of `it.todo` /
+> `test.fixme(true, …)` / `pytest.skip(…)`), replace with a real body
+> using the contract for headers/payload/assertions. AAA, no shared
+> mutable state, clear names. Stay inside `tests/qa-agent/`.
+
+### Phase 7 verification gate — required before phase 8
+
+After every batch returns and again after the whole phase is done:
+
+```bash
+grep -rln "QA-AGENT-BODY" "${PROJECT_ROOT}/tests/qa-agent/" 2>/dev/null \
+  || echo "all bodies authored"
+```
+
+- `all bodies authored` → proceed to phase 8.
+- Any file path printed → that scaffold is still a stub. Look up its
+  `scenario_id` in `state/generated_tests.json`; re-dispatch
+  `qa-body-author` for that one scenario. Do not call phase 8 while
+  any `QA-AGENT-BODY` remains — the runner will skip those tests and
+  inflate the apparent skip count.
+
+This gate is not optional. Past runs silently left ui/accessibility
+scaffolds unfilled when the body-author missed the `test.fixme(true)`
+stub form.
+
+### Phase 8 — run tests (CLI)
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" run-tests --project "${PROJECT_ROOT}" --skip-install
+```
+
+Use `--skip-install` when the user has confirmed the SUT environment
+is already prepared. Otherwise omit. `execution_history.json` records
+which tests passed/failed/skipped.
+
+### Phase 9 — triage failures (AGENT, fan-out per failure)
+
+Only dispatch `qa-triage` for tests with `status: failed` in
+`execution_history.json`. Skip passed and skipped tests. Up to 5
+concurrent.
+
+Prompt body:
+
+> Failing test: `<test path from execution_history>`.
+> Test id: `<scenario_id from generated_tests.json>`.
+> Read its source, the log at
+> `runs/<latest>/logs/<test>.log`, and the handler at the path in
+> `state/contracts/<capability>.json`. Compare against the contract.
+> Emit verdict to `state/critique/<test_id>.json` per the qa-triage
+> schema: `verdict` ∈ {`test-bug`, `prod-bug`, `flaky`, `infra`},
+> `confidence`, `evidence`, `action`.
+
+### Retry loop
+
+After triage, ask the CLI which tests should retry:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" retry-decide --project "${PROJECT_ROOT}"
+```
+
+Returns a JSON array. For each entry with `should_retry=true`, re-run
+that single test and triage again. Max 2 retries per test; the CLI
+persists attempt counts in `state/retry_budget.json`.
+
+### Phase 10 — report (CLI)
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" report --open --project "${PROJECT_ROOT}"
+```
+
+Renders the HTML report and (with `--open`) opens it in the browser.
+
+## What you must NOT do
+
+- **NEVER** try Bash to invoke an AGENT phase. There is no
+  `qa-agent enrich` / `author-scenarios` / `author-bodies` /
+  `triage` subcommand. If the CLI rejects the command, that is the
+  signal to use the `Agent` tool — **not** the signal to "do it
+  yourself".
+- **NEVER** fall back to writing contracts, scenarios, test bodies,
+  or triage verdicts yourself in this thread because fan-out felt
+  awkward. Saying "now dispatching N sub-agents" and then running
+  Bash writes instead is the exact failure mode the architecture
+  exists to prevent.
+- **NEVER** call Agent with a `subagent_type` you have not seen in
+  the project's available list. If a type is unknown, stop and
+  surface the error — re-installing/reloading the plugin is the only
+  fix.
+
+## When a sub-agent fails
+
+A sub-agent fails when its expected output file is missing or
+malformed.
+
+- Missing `contracts/<cap>.json` → re-dispatch `qa-enricher` once for
+  that capability. Failing again → mark that capability as
+  `enrich_failed` in `run.json` and continue with the rest.
+- Missing `scenarios/<cap>.json` → same pattern.
+- Scaffold still has `QA-AGENT-BODY` → re-dispatch `qa-body-author`
+  for that specific scenario. Still empty → mark as
+  `skipped: authoring failed` and continue.
+- Missing triage verdict → skip retry for that test and report it as
+  `triage failed — see logs`.
+
+Never block the whole pipeline on one capability or one test.
+
+## Other triggers
+
+### "analyze project", "נתח פרויקט"
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" analyze --project "${PROJECT_ROOT}"
+```
+Then `jq -r .project_summary "${PROJECT_ROOT}/.qa-agent/state/knowledge_graph.json"`
+and report the summary plus the top 3 risks from `risk_matrix.json`.
+
+### "rerun tests", "הרץ שוב"
+Ask the user for scope (`changed`, `failed`, `flaky`, `all`) if it's
+ambiguous, otherwise default to `changed`.
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" rerun --scope changed --project "${PROJECT_ROOT}"
+```
+
+### "open qa report", "פתח דוח qa"
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" report --open --project "${PROJECT_ROOT}"
+```
+
+## Output style
+
+When the pipeline finishes, surface to the user:
+
+- Lead with the verdict: quality score (0–100) + pass rate (%).
+- HTML report path on a single line, clickable.
+- Top 3 capabilities by risk (from `risk_matrix.json`).
+- Stop. No bullet-storms.
 
 ## First-run latency
 
-The very first `qa-skills-run` call after install creates a Python venv
-under `${CLAUDE_PLUGIN_ROOT}/.venv` and installs the `qa-agent` package
-(~20-40 s). Subsequent calls reuse the venv and start instantly.
-
-## Notes
-
-The qa-master agent reads state from `${PROJECT_ROOT}/.qa-agent/state/`
-and writes the HTML report at
-`${PROJECT_ROOT}/.qa-agent/runs/<latest>/report.html`.
+The very first `qa-skills-run` call after install creates the plugin
+venv under `${CLAUDE_PLUGIN_ROOT}/.venv` and `pip install`s the
+`qa-agent` package (~20–40 s). Subsequent calls reuse the venv.
