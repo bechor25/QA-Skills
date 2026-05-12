@@ -25,16 +25,41 @@ If hints are missing, derive them from
 
 ## What to read
 
-For the target capability, read **only** files that are likely
-handlers, controllers, services, validators, or DTOs:
+The contract has **two** sides — backend endpoints and frontend entry
+points. You must populate both. Read each side separately.
+
+### Backend (always)
+
+For the target capability, read files that are likely handlers,
+controllers, services, validators, or DTOs:
 
 - Express/Fastify/Koa: `routes/`, `controllers/`, `middleware/auth*`.
 - NestJS: `*.controller.ts`, `*.service.ts`, `*.dto.ts`, `*.guard.ts`.
 - FastAPI/Flask: `routers/`, `views/`, `schemas/`, `dependencies.py`.
 - Next.js API routes: `app/api/**/route.ts`, `pages/api/**`.
 
-Stop after ~10 files or ~3000 lines, whichever comes first. You are
-extracting a contract, not auditing the codebase.
+### Frontend (required — do NOT skip)
+
+For the **same capability**, also scan the project's UI source for
+matching pages/routes/components. Common roots:
+
+- Next.js app router: `app/**/page.tsx`, `app/**/layout.tsx`.
+- Next.js pages router: `pages/**/*.tsx` (excluding `pages/api/`).
+- React Router / Vue Router / SvelteKit: `routes/`, `src/pages/`,
+  `src/app/`, `src/views/`.
+- Monorepo conventions: `apps/web/`, `apps/client/`, `apps/frontend/`,
+  `packages/ui/`.
+
+Match by name/keyword: a capability `auth` should pull files like
+`Login.tsx`, `Signup.tsx`, `MfaForm.tsx`; `admin` pulls
+`AdminDashboard.tsx`, `UsersTable.tsx`; `permissions` pulls
+`RoleEditor.tsx`. Use `Grep` for the capability keyword across UI
+roots, then `Read` the top 3–5 hits.
+
+Stop after ~10 files or ~3000 lines per side (backend + frontend = 20
+files / 6000 lines maximum). You are extracting a contract, not
+auditing the codebase. If a project genuinely has no frontend, record
+that fact in `notes` and emit `ui_entry_points: []` — never assume.
 
 ## What to emit
 
@@ -77,11 +102,34 @@ Write **valid JSON** to
     }
   ],
   "ui_entry_points": [
-    {"route": "/login", "file": "apps/web/src/pages/Login.tsx", "needs_auth": false}
+    {
+      "route": "/login",
+      "file": "<frontend file path you read>",
+      "needs_auth": false,
+      "primary_actions": ["email input", "password input", "submit button"]
+    }
   ],
   "notes": "Free-text observations: rate limits, idempotency, etc."
 }
 ```
+
+`ui_entry_points` is a **first-class field**, not optional. Every
+capability that has any UI surface must list at least one route. Each
+entry must include:
+
+- `route` — the **browser path** (e.g. `/login`, `/admin/users`,
+  `/settings/security`). This is what Playwright will `page.goto()` to.
+  Do **not** put API paths here; those belong in `endpoints[].path`.
+- `file` — the React/Vue/Svelte/etc. component or page file that
+  renders this route. Repo-relative.
+- `needs_auth` — does the user need a session/cookie to land here?
+- `primary_actions` — short, human-readable labels for the interactive
+  elements a UI test would touch (form fields, buttons, links). 3–6
+  items max.
+
+If you populate `endpoints[]` but leave `ui_entry_points: []` for a
+capability that obviously has a UI (e.g. `auth`, `admin`,
+`user-mgmt`), that is a contract bug. Re-check the frontend roots.
 
 ## Rules
 
@@ -109,10 +157,11 @@ guess. The orchestrator will degrade that capability gracefully.
 
 ## Output to the orchestrator
 
-After writing the file, return a one-line confirmation:
+After writing the file, return a one-line confirmation that mentions
+both counts so the orchestrator can detect gaps:
 
 ```
-contracts/<capability>.json written — N endpoints
+contracts/<capability>.json written — N endpoints, M ui_entry_points
 ```
 
 Nothing else. No prose, no recap.

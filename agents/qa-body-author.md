@@ -43,12 +43,24 @@ Do **not** read application source. Everything you need is in state.
 For each scenario:
 
 1. Open the scaffolded file at the path from `generated_tests.json`.
-2. Replace the `it.todo("QA-AGENT-BODY: ...")` (or `pytest.skip` for
-   Python) with a real test body.
+2. Find the stub and replace it with a real test body. A stub is **any
+   one of these three patterns** — all carry the `QA-AGENT-BODY`
+   marker, all must be replaced:
+   - `it.todo("QA-AGENT-BODY: ...")`            (jest — api / security / performance)
+   - `test.fixme(true, "QA-AGENT-BODY: ...")`   (playwright — ui / accessibility)
+   - `pytest.skip("QA-AGENT-BODY: ...")`        (pytest — any category, python)
+   The marker token is identical across all three. Treat `it.todo`,
+   `test.fixme(true, ...)`, and `pytest.skip(...)` as equivalent stubs.
 3. Keep the existing imports unless you need to add one (then add at
    the top, alphabetized).
 4. Do **not** touch sibling tests in the same file unless they are
    also in your batch.
+
+When you finish a file, run a sanity check on your own output: the
+file must contain **zero** occurrences of the string `QA-AGENT-BODY`
+and zero `test.fixme(true)` / `it.todo` / `pytest.skip` lines that
+carry the marker. If you cannot remove a stub, leave it in place and
+append an `AUTHORING-GAP` comment per the rules below.
 
 ## Body rules — all categories
 

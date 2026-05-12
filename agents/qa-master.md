@@ -105,73 +105,161 @@ for you to dispatch sub-agents.
 First call may take ~30 s (venv + pip install). Subsequent calls reuse
 the venv and start immediately.
 
-## Fan-out recipes
+## Fan-out recipes — CRITICAL
+
+### How to actually dispatch sub-agents
+
+Sub-agent phases (enrich, author-scenarios, author-bodies, triage) are
+**LLM phases**. They have **no CLI subcommand**. If you ever try
+`qa-skills-run enrich`, `qa-skills-run author-scenarios`,
+`qa-skills-run author-bodies`, or `qa-skills-run triage` you will get
+`error: argument command: invalid choice`. That is by design — the
+work must go through the **`Agent` tool**.
+
+You dispatch by calling the `Agent` tool, exactly like you call `Bash`
+or `Read`. Each Agent call takes these fields:
+
+- `subagent_type` — one of: `qa-enricher`, `qa-scenario-author`,
+  `qa-body-author`, `qa-triage`. (If the harness reports the type as
+  `qa-skills:qa-enricher` etc. use that exact namespaced form.)
+- `description` — short label (3–5 words).
+- `prompt` — the full briefing string. Self-contained — the sub-agent
+  has zero conversation context.
+
+To fan out, place **N `Agent` tool calls inside one assistant message**.
+The runtime executes them in parallel. Sequential dispatch — one Agent
+call, wait for result, then the next — defeats the entire architecture
+and is a contract violation.
+
+### What you must NOT do
+
+- **NEVER** try to use Bash to invoke an Agent phase. There is no
+  `qa-agent enrich` / `author-scenarios` / `author-bodies` / `triage`
+  subcommand. If you discover the CLI rejects the command, that is the
+  signal to use the `Agent` tool, **not** the signal to "do it
+  yourself".
+- **NEVER** fall back to writing test bodies, contracts, scenarios, or
+  triage verdicts yourself in this top-level thread because
+  fan-out felt awkward. The whole point of the architecture is that
+  each sub-agent sees only its capability slice. If you do the work
+  here, your context fills up with N capabilities at once and the
+  output quality collapses — that is the exact failure mode this
+  architecture exists to prevent.
+- **NEVER** call Agent with a `subagent_type` you have not seen in the
+  list above. If the harness reports the type is unknown, stop and
+  surface the error to the user — re-installing/reloading the plugin
+  is the only fix.
 
 ### Phase 4 — enrich routes (parallel per capability)
 
-Read `state/strategy.json` to get the capability list. Then send **one**
-message with N Agent tool calls, where N = number of capabilities:
+Read `state/strategy.json` to get the capability list. Then issue
+**one assistant message** containing N `Agent` tool calls. Example
+prompt body for `qa-enricher`:
 
-```
-Agent(subagent_type="qa-enricher", description="enrich auth",
-      prompt="Capability: auth. Project root: ${PROJECT_ROOT}. " +
-             "Read state/strategy.json entry for auth and the handler " +
-             "files under apps/api/src/routes/auth*. Emit JSON to " +
-             "state/contracts/auth.json with: auth_required, " +
-             "request_schema, response_2xx_schema, response_4xx_schema, " +
-             "side_effects, related_files.")
-Agent(subagent_type="qa-enricher", description="enrich permissions", ...)
-Agent(subagent_type="qa-enricher", description="enrich user-mgmt", ...)
-...
-```
+> Capability: `<capability>`. Project root: `${PROJECT_ROOT}`.
+> Read `state/strategy.json` (your entry), the backend handler files
+> for this capability, **and** the frontend page/route files for this
+> capability (look under `apps/web/`, `apps/client/`, `apps/frontend/`,
+> `src/pages/`, `src/app/`, `src/routes/` — whichever exist in this
+> project). Emit JSON to `state/contracts/<capability>.json` per the
+> qa-enricher schema: `endpoints[]` (with method, path, module_path,
+> auth_required, request, response_2xx, response_4xx, side_effects,
+> related_files) **and** `ui_entry_points[]` (with route, file,
+> needs_auth, primary_actions) for every UI surface that maps to this
+> capability. Leaving `ui_entry_points` empty for a capability with an
+> obvious UI is a contract bug — re-scan the frontend roots before
+> giving up. Stay in scope, return one line confirming the file was
+> written.
 
-After all return, verify each `state/contracts/<cap>.json` exists.
-Missing file = re-dispatch that single capability.
+Issue one such Agent call **per capability**. All in the same message.
+
+After all sub-agents return:
+
+- Verify each `state/contracts/<cap>.json` exists. Missing file =
+  re-dispatch that single capability.
+- For every capability whose `strategy.json` entry includes `ui` or
+  `accessibility`, verify `ui_entry_points` is **non-empty**. If a
+  capability lists those categories but came back with
+  `ui_entry_points: []`, re-dispatch `qa-enricher` for that capability
+  with a stronger frontend-scan hint. Never proceed to scenario
+  authoring while `ui_entry_points` is empty for a capability that
+  needs ui/a11y coverage.
 
 ### Phase 5 — author scenarios (parallel per capability)
 
-```
-Agent(subagent_type="qa-scenario-author", description="scenarios auth",
-      prompt="Capability: auth. Read state/contracts/auth.json and " +
-             "the strategy entry for auth. Emit scenarios to " +
-             "state/scenarios/auth.json covering categories " +
-             "{api, ui, security, accessibility}. Each scenario must " +
-             "include payload examples derived from request_schema and " +
-             "expected status + body shape from response schemas.")
-```
+After contracts exist, fan out `qa-scenario-author`. Prompt body:
+
+> Capability: `auth`. Read `state/contracts/auth.json`, the strategy
+> entry for `auth`, and the risk_matrix score. Emit
+> `state/scenarios/auth.json` per the qa-scenario-author schema —
+> categories per `strategy.json`. Use payload examples from the
+> contract's request schema. Stay in scope.
 
 ### Phase 7 — author test bodies (parallel per scenario batch)
 
 Batch scenarios by capability+category (≤5 scenarios per call) to keep
-each sub-agent's context tight. **Max 5 concurrent Agent calls.**
+each sub-agent's context tight. **Max 5 concurrent Agent calls** —
+send the first 5 in one message; once they all return, send the next
+5; repeat until done.
 
+**You must dispatch a body-author batch for every `(capability,
+category)` pair that has at least one scenario.** That includes
+`ui`, `accessibility`, and `performance` — not just `api` and
+`security`. Skipping a category because its scaffolds look unusual
+(e.g. Playwright `test.fixme(true, …)` instead of jest `it.todo(…)`)
+is a contract violation. All three stub forms (`it.todo`,
+`test.fixme(true, …)`, `pytest.skip(…)`) are equivalent — see
+[qa-body-author.md](qa-body-author.md).
+
+Prompt body for `qa-body-author`:
+
+> Category: `<category>`. Capability: `<capability>`.
+> Scenario IDs: `[<id1>, <id2>, …]` (≤5).
+> Project root: `${PROJECT_ROOT}`.
+> Read `state/contracts/<capability>.json`,
+> `state/scenarios/<capability>.json`, `state/generated_tests.json`
+> (for scaffold paths), and for ui/accessibility batches also
+> `state/ui_selectors.json`. For each scenario, open the scaffolded
+> file, find the stub (`it.todo` / `test.fixme(true, …)` /
+> `pytest.skip(…)` — all carry the `QA-AGENT-BODY` marker), replace
+> with a real body using the contract for headers/payload/assertions.
+> AAA, no shared mutable state, clear names. Stay inside
+> `tests/qa-agent/`.
+
+### Phase 7 verification gate — required before Phase 8
+
+After every body-author batch returns, **and again once the whole
+phase is supposedly done**, run this check via Bash:
+
+```bash
+grep -rln "QA-AGENT-BODY" "${PROJECT_ROOT}/tests/qa-agent/" 2>/dev/null \
+  || echo "all bodies authored"
 ```
-Agent(subagent_type="qa-body-author", description="bodies auth/api",
-      prompt="Category: api. Scenarios: [sc::auth::api::01, sc::auth::api::02]. " +
-             "Project root: ${PROJECT_ROOT}. " +
-             "Read state/contracts/auth.json, state/scenarios/auth.json, " +
-             "and state/ui_selectors.json (if ui). For each scenario, " +
-             "open the scaffolded file at the path in generated_tests.json " +
-             "and replace the it.todo stub with a real body. Use the " +
-             "contract for headers, payload, assertions. Best practice: " +
-             "arrange-act-assert, no shared mutable state, clear test " +
-             "names. Do not touch files outside tests/qa-agent/.")
-```
+
+- Output `all bodies authored` → proceed to Phase 8.
+- Any file path printed → that scaffold is still a stub. Look up its
+  `scenario_id` in `state/generated_tests.json`, and **re-dispatch
+  `qa-body-author`** for that one scenario. Do not call Phase 8
+  (`run-tests`) while any `QA-AGENT-BODY` marker remains — the runner
+  will skip those tests and inflate the apparent skip count.
+
+This gate is not optional. It exists because past runs silently left
+ui and accessibility scaffolds unfilled when the body-author missed
+the `test.fixme(true)` stub form.
 
 ### Phase 9 — triage failures (parallel per failure)
 
-Only dispatch for tests with `status: failed` in `execution_history.json`.
-Skip passed and skipped tests.
+Only dispatch `qa-triage` for tests with `status: failed` in
+`execution_history.json`. Skip passed and skipped tests.
 
-```
-Agent(subagent_type="qa-triage", description="triage auth/api/01",
-      prompt="Failing test: tests/qa-agent/api/auth.happy-path.spec.ts. " +
-             "Read its source, the error log at runs/<latest>/logs/<test>.log, " +
-             "and the handler at apps/api/src/routes/auth.ts. Compare against " +
-             "state/contracts/auth.json. Emit verdict to " +
-             "state/critique/sc::auth::api::01.json with fields: verdict " +
-             "(test-bug|prod-bug|flaky|infra), confidence, evidence, action.")
-```
+Prompt body:
+
+> Failing test: `tests/qa-agent/api/auth.happy-path.spec.ts`.
+> Test id: `sc::auth::api::01`.
+> Read its source, the log at `runs/<latest>/logs/<test>.log`, and
+> the handler at the path in `state/contracts/auth.json`. Compare
+> against the contract. Emit verdict to
+> `state/critique/sc::auth::api::01.json` per the qa-triage schema.
 
 ## Retry budget
 

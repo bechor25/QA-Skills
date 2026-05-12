@@ -49,6 +49,66 @@ nullable fields, pagination, file uploads, idempotency keys, rate
 limits, etc. Cap at 8 scenarios per capability+category combination —
 quality over quantity.
 
+## Per-category scenario shape (read before authoring)
+
+The five categories are **not interchangeable**. Each tests a
+different surface and needs scenarios written in its own frame. The
+single biggest failure mode of this agent is collapsing all five
+categories into duplicate HTTP request/response checks. Do not do
+that.
+
+### api — HTTP contract on the backend
+
+- **Driver:** `endpoints[]` from the contract.
+- **`request.path`** is an API path (e.g. `/api/users`).
+- **Assert:** status code, response body shape, response headers,
+  side effects on the backend.
+- ✓ "POST /api/auth/login with valid credentials returns 200 with token"
+- ✗ Anything that requires a rendered browser page
+
+### ui — browser navigation + interaction
+
+- **Driver:** `ui_entry_points[]` from the contract. If empty for this
+  capability, emit zero ui scenarios and add a `notes` entry
+  explaining the gap. **Never fall back to API paths.**
+- **`request.path`** is a **browser path** (e.g. `/login`,
+  `/admin/users`) — never `/api/...`.
+- **Assert:** visible DOM state, URL changes, role/text of elements,
+  toasts/dialogs, redirects.
+- ✓ "Submitting the login form with valid credentials lands on /dashboard and shows the user menu"
+- ✓ "Clicking 'Delete' on a user row opens a confirm dialog with the user's email"
+- ✗ "POST /api/auth/login returns 200" — that is an api scenario, not ui
+- ✗ "GET /api/admin/users returns 200" — that is an api scenario, not ui
+
+### security — negative outcomes that prove the guard works
+
+- **Driver:** `endpoints[].auth_required` + role hints.
+- **Assert:** 401 on no token, 403 on wrong role, 4xx + no data leak
+  on injected payloads, no PII in error messages.
+- ✓ "GET /api/admin/users without Authorization header returns 401"
+- ✓ "GET /api/admin/users with a non-admin token returns 403 and an opaque error"
+- ✗ "GET /api/admin/users with a valid admin token returns 200" — that is an api smoke scenario, not security
+
+### accessibility — rendered-page conformance
+
+- **Driver:** `ui_entry_points[]`. Like ui, if empty → zero a11y
+  scenarios with a `notes` entry.
+- **`request.path`** is a **browser path**.
+- **Assert:** axe-core finds zero serious/critical violations,
+  keyboard tab order visits all interactive elements, focus is visible,
+  labels are bound to inputs.
+- ✓ "Login page passes axe-core with zero serious or critical violations"
+- ✓ "Tab order on /admin/users visits every row's action buttons once"
+- ✗ "Health endpoint returns JSON" — that is an api scenario, not a11y
+- ✗ "Auth error responses use a consistent shape" — that is an api scenario, not a11y
+
+### performance — latency budget on a real workload
+
+- **Driver:** `endpoints[]` or `ui_entry_points[]`.
+- **Assert:** p95 of N samples is below a documented threshold.
+- ✓ "p95 of 20 sequential GET /api/users requests stays under 250 ms"
+- ✗ "GET /api/users returns 200" — that is an api smoke scenario, not performance
+
 ## What to emit
 
 Write to `<project_root>/.qa-agent/state/scenarios/<capability>.json`:
@@ -113,6 +173,18 @@ across the file. Stable for diffs.
 6. **Empty contract → empty scenarios.** If
    `contracts/<capability>.json` has `endpoints: []`, emit
    `scenarios: []` with a `notes` field explaining the gap.
+7. **Empty `ui_entry_points` → no `ui` or `accessibility` scenarios.**
+   When the contract has zero UI entry points, you must skip both the
+   `ui` and `accessibility` categories for this capability — even if
+   `strategy.json` lists them. Emit zero scenarios in those categories
+   and add a sentence to `notes` such as: `"ui/accessibility skipped:
+   contract has empty ui_entry_points — re-run qa-enricher with
+   stronger frontend scan if this capability has a real UI."` Falling
+   back to API paths in a ui/a11y scenario is the worst failure mode
+   of this agent and is explicitly forbidden.
+8. **`ui` and `accessibility` paths come from `ui_entry_points[].route`
+   only.** Never copy a path from `endpoints[].path` (which is an API
+   path) into a ui or a11y scenario's `request.path`.
 
 ## Output to the orchestrator
 
