@@ -16,9 +16,12 @@ from pathlib import Path
 from ..shared.logging import get_logger
 from ..state import schemas
 from .assertion_validator import validate_test_file
+from .import_validator import validate_imports
 from .selector_validator import validate_selectors
 
 log = get_logger("qa_agent.quality.test_critic")
+
+_CRITICAL_RULES = {"read-failed", "import-unresolved"}
 
 
 def critique_files(
@@ -30,6 +33,7 @@ def critique_files(
     for entry in tests.entries:
         abs_path = project_root / entry.path
         findings: list[schemas.CritiqueFinding] = list(validate_test_file(abs_path))
+        findings.extend(validate_imports(abs_path))
         if entry.framework == "playwright":
             findings.extend(validate_selectors(abs_path))
         score = _score(findings)
@@ -50,6 +54,9 @@ def _score(findings: list[schemas.CritiqueFinding]) -> float:
         return 10.0
     if any(f.rule == "read-failed" for f in findings):
         return 1.0
+    if any(f.rule in _CRITICAL_RULES for f in findings):
+        # File can't execute (broken import or read failure). Hard fail.
+        return 2.0
     if any(f.severity == "error" for f in findings):
         return 4.0
     return 7.0

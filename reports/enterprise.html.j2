@@ -78,6 +78,11 @@
       <div class="card"><div class="label">Skipped</div><div class="value">{{ data.executive_summary.skipped }}</div></div>
       <div class="card"><div class="label">Flaky</div><div class="value" style="color: var(--warn);">{{ data.executive_summary.flaky }}</div></div>
       <div class="card"><div class="label">Critic avg</div><div class="value">{{ "%.1f"|format(data.executive_summary.critique_avg) }}/10</div></div>
+      <div class="card">
+        <div class="label">Effective coverage</div>
+        <div class="value">{{ "%.0f"|format((data.coverage.effective_coverage or 0) * 100) }}%</div>
+        <div class="label" style="font-size: 11px; color: var(--muted);">passed / attempted</div>
+      </div>
     </div>
     <p style="color: var(--muted); margin-top: 14px;">{{ data.project.summary }}</p>
   </section>

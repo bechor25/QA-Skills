@@ -7,7 +7,7 @@ description: Scan + risk-rate the project without generating or running tests. T
 
 The user wants understanding, not execution. Hand off to **qa-master** with:
 
-> Run `qa-agent analyze --project "${PWD}"`. Then summarize:
+> Run `${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run analyze --project "${PROJECT_ROOT}"`. Then summarize:
 > - project_summary (one paragraph)
 > - top 3 risk capabilities with their score + rationale
 > - frameworks detected

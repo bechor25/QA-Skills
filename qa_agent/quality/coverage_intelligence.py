@@ -42,10 +42,16 @@ def compute_coverage(
                 fail_per_feature[fid] += rec.failed
 
     by_feature: list[dict[str, Any]] = []
+    total_passed = 0
+    total_attempted = 0
     for fid, planned in planned_per_feature.items():
         executed = executed_per_feature.get(fid, set())
         passed = pass_per_feature.get(fid, 0)
         failed = fail_per_feature.get(fid, 0)
+        attempted = passed + failed
+        total_passed += passed
+        total_attempted += attempted
+        eff = (passed / attempted) if attempted else 0.0
         by_feature.append(
             {
                 "feature_id": fid,
@@ -55,7 +61,12 @@ def compute_coverage(
                 "executed_count": len(executed),
                 "tests_passed": passed,
                 "tests_failed": failed,
+                # Categories planned vs executed — does *not* reflect
+                # whether the executed tests passed.
                 "coverage_ratio": (len(executed) / len(planned)) if planned else 0.0,
+                # Tests that actually passed out of attempted — the
+                # honest measure for stakeholders.
+                "effective_coverage": eff,
             }
         )
 
@@ -75,6 +86,7 @@ def compute_coverage(
         "by_risk": risk_buckets,
         "total_planned_features": len(planned_per_feature),
         "total_executed_features": sum(1 for v in executed_per_feature.values() if v),
+        "effective_coverage": (total_passed / total_attempted) if total_attempted else 0.0,
     }
 
 

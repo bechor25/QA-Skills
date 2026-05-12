@@ -1,9 +1,12 @@
 {
   "name": "qa-skills",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "QA Operating System — autonomous test scanning, generation, execution, and reporting. A single QA Master agent orchestrates; a Python engine does the work. Supports TypeScript/JavaScript, Python, and Java.",
   "author": {
     "name": "Bechor Simhaev",
     "url": "https://github.com/bechor25"
+  },
+  "requirements": {
+    "python": ">=3.11"
   }
 }

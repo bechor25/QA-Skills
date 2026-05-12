@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# qa-skills-run — entry point invoked by the qa-master agent.
+#
+# Resolves the qa-agent CLI (bootstrapping the plugin venv on first call)
+# and execs it with the user-supplied arguments. Keeps every plugin call
+# routed through a single wrapper so failures are easy to localize.
+
+set -euo pipefail
+
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+QA_AGENT_BIN="$("$PLUGIN_ROOT/bin/qa-skills-bootstrap.sh")"
+exec "$QA_AGENT_BIN" "$@"

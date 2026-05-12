@@ -15,6 +15,7 @@ FixAction = Literal[
     "increase-timeout",
     "add-wait",
     "install-missing-dep",
+    "fix-import-path",
     "no-op",
     "manual",
 ]
@@ -28,6 +29,7 @@ class Policy:
             "timeout":            ["increase-timeout", "add-wait"],
             "selector":           ["add-wait", "manual"],
             "missing-dependency": ["install-missing-dep"],
+            "import-path":        ["fix-import-path", "manual"],
             "auth":               ["manual"],
             "assertion":          ["manual"],  # never weaken assertions automatically
             "syntax":             ["manual"],

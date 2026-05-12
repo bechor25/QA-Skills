@@ -29,6 +29,7 @@ _NODE_TEST_DEPS: dict[str, list[str]] = {
     "playwright": ["@playwright/test"],
     "playwright-a11y": ["@axe-core/playwright"],
     "jest": ["jest", "@jest/globals", "supertest", "@types/supertest"],
+    "jest-ts": ["ts-jest", "typescript", "@types/jest"],
 }
 
 _PY_TEST_DEPS: dict[str, list[str]] = {
@@ -64,6 +65,17 @@ def plan_installs(
                     reason="jest+supertest required by generated TS API tests",
                 )
             )
+            # If any generated jest test is TypeScript, ensure ts-jest is present
+            # so jest can transform `.ts` files. Without this, jest crashes with
+            # "Cannot use import statement outside a module".
+            if any(t.framework == "jest" and t.language == "typescript" for t in tests.entries):
+                steps.append(
+                    InstallStep(
+                        manager=node_mgr,
+                        args=_node_install_args(node_mgr, _NODE_TEST_DEPS["jest-ts"], dev=True),
+                        reason="ts-jest required to run TS jest tests",
+                    )
+                )
         if "playwright" in frameworks_used:
             steps.append(
                 InstallStep(

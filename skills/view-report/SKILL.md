@@ -9,11 +9,11 @@ The user wants to see the report from the most recent run.
 
 ## Hand off
 
-> Run `qa-agent report --open --project "${PWD}"`. The CLI prints the
+> Run `${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run report --open --project "${PROJECT_ROOT}"`. The CLI prints the
 > absolute path to the report file on stdout — surface that exact path
 > in your reply so the user can click it.
 
 ## If there's no run yet
 
-If `${PWD}/.qa-agent/runs/` is empty or missing, tell the user to run
+If `${PROJECT_ROOT}/.qa-agent/runs/` is empty or missing, tell the user to run
 **test-orchestrator** first.

@@ -143,6 +143,16 @@ class ScenarioStep(BaseModel):
     text: str
 
 
+class RouteHint(BaseModel):
+    """Concrete route info attached to a scenario so the generator
+    can emit a request targeting the real endpoint instead of `GET /`."""
+
+    method: str            # GET | POST | PUT | PATCH | DELETE | USE | ROUTE
+    pattern: str           # e.g. /users/:id
+    module_path: str = ""  # source file the route was discovered in
+    framework: str = ""    # Express | FastAPI | Flask | DRF | ...
+
+
 class Scenario(BaseModel):
     id: str
     feature_id: str
@@ -152,6 +162,7 @@ class Scenario(BaseModel):
     description: str = ""
     steps: list[ScenarioStep] = Field(default_factory=list)
     severity: Literal["smoke", "critical", "edge", "negative"] = "smoke"
+    route: RouteHint | None = None
 
 
 class Scenarios(BaseModel):

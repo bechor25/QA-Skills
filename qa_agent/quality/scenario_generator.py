@@ -13,11 +13,63 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ..context.kg_builder import _classify_capability
+from ..scanners.api_scanner import ApiInventory, RouteEntry
 from ..shared.errors import StrategyError
 from ..shared.logging import get_logger
 from ..state import schemas
 
 log = get_logger("qa_agent.quality.scenario_generator")
+
+
+def _routes_by_capability(api: ApiInventory | None) -> dict[str, list[RouteEntry]]:
+    """Group discovered routes by the same capability hints used in kg_builder."""
+    out: dict[str, list[RouteEntry]] = {}
+    if api is None:
+        return out
+    for r in api.routes:
+        cap = _classify_capability(f"{r.pattern} {r.handler}")
+        out.setdefault(cap, []).append(r)
+    return out
+
+
+def _pick_route_for_scenario(
+    capability: str,
+    category: str,
+    severity: str,
+    routes: list[RouteEntry] | None,
+) -> schemas.RouteHint | None:
+    """Choose a representative route for a scenario.
+
+    Heuristic:
+      - happy/smoke: prefer GET, else first route.
+      - negative: prefer POST/PUT/PATCH (write paths reject bad input).
+      - security: prefer routes that look protected (auth/admin/users).
+    """
+    if not routes:
+        return None
+
+    def is_write(r: RouteEntry) -> bool:
+        return r.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
+
+    def is_read(r: RouteEntry) -> bool:
+        return r.method.upper() == "GET"
+
+    preferred: list[RouteEntry]
+    if category == "api" and severity == "negative":
+        preferred = [r for r in routes if is_write(r)] or routes
+    elif category == "security":
+        preferred = [r for r in routes if r.pattern not in ("/", "")] or routes
+    else:
+        preferred = [r for r in routes if is_read(r)] or routes
+
+    r = preferred[0]
+    return schemas.RouteHint(
+        method=r.method.upper(),
+        pattern=r.pattern,
+        module_path=r.module_path,
+        framework=r.framework,
+    )
 
 
 # Per-category baseline templates. The generator inserts a feature noun
@@ -110,10 +162,19 @@ _TEMPLATES: dict[str, list[dict]] = {
 }
 
 
-def build_baseline_scenarios(strategy: schemas.Strategy) -> schemas.Scenarios:
-    """Deterministic scenarios from a Strategy."""
+def build_baseline_scenarios(
+    strategy: schemas.Strategy,
+    api: ApiInventory | None = None,
+) -> schemas.Scenarios:
+    """Deterministic scenarios from a Strategy.
+
+    When `api` is provided, attaches a concrete `RouteHint` to api/security
+    scenarios so generators can target the real endpoint instead of `/`.
+    """
+    routes_idx = _routes_by_capability(api)
     out: list[schemas.Scenario] = []
     for s in strategy.entries:
+        cap_routes = routes_idx.get(s.capability, [])
         for cat in s.categories:
             for idx, tpl in enumerate(_TEMPLATES.get(cat, []), start=1):
                 scenario_id = f"sc::{s.capability}::{cat}::{idx:02d}"
@@ -121,6 +182,9 @@ def build_baseline_scenarios(strategy: schemas.Strategy) -> schemas.Scenarios:
                     schemas.ScenarioStep(keyword=k, text=text.format(capability=s.capability))
                     for k, text in tpl["steps"]
                 ]
+                route_hint = _pick_route_for_scenario(
+                    s.capability, cat, tpl["severity"], cap_routes
+                )
                 out.append(
                     schemas.Scenario(
                         id=scenario_id,
@@ -131,6 +195,7 @@ def build_baseline_scenarios(strategy: schemas.Strategy) -> schemas.Scenarios:
                         description="",
                         steps=steps,
                         severity=tpl["severity"],
+                        route=route_hint,
                     )
                 )
 

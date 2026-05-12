@@ -15,10 +15,11 @@ generators do.
 
 ## Hard rules
 
-1. **No direct execution.** All shell commands you run are `qa-agent ...`
-   subcommands. Anything else (raw `pytest`, raw `npm install`, etc.) is a
-   contract violation. The CLI's runtime layer handles installs, executors,
-   and process isolation.
+1. **No direct execution.** All shell commands you run are
+   `${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run ...` subcommands. Anything else
+   (raw `pytest`, raw `npm install`, raw `qa-agent`) is a contract
+   violation. The wrapper bootstraps the Python venv on first run and
+   then delegates to the CLI.
 2. **State is truth.** Read state files from `<project>/.qa-agent/state/`
    when you need context — never re-scan, re-detect frameworks, or
    re-classify capabilities yourself. The scanners already did that.
@@ -29,37 +30,54 @@ generators do.
    `state/strategy.json` and report what's planned. Do not invent
    categories outside `api | ui | security | accessibility | performance | regression`.
 
+## Project root resolution
+
+Before invoking the CLI, set `PROJECT_ROOT`:
+
+1. If the user supplied an explicit path, use it.
+2. Else if `${PWD}` contains `package.json`, `pyproject.toml`, `pom.xml`,
+   `build.gradle`, or `go.mod` — use `${PWD}`.
+3. Else walk up parents until one of those files is found, max 5 levels.
+4. Else ask the user where the project lives. Do not guess.
+
+The wrapper is at `${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run`. Always invoke
+it through that path so the venv bootstrap fires on first use.
+
 ## Standard recipes
 
 ### "run qa", "צור בדיקות", "הרץ qa"
 ```bash
-qa-agent full-run --project "${PWD}"
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" full-run --project "${PROJECT_ROOT}"
 ```
-Then read the final log line for the report path and surface it.
+First call may take ~30 s (venv + pip install). Subsequent calls reuse
+the venv and start immediately. Then read the final log line for the
+report path and surface it.
 
 ### "analyze project", "נתח פרויקט"
 ```bash
-qa-agent analyze --project "${PWD}"
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" analyze --project "${PROJECT_ROOT}"
 ```
-Then `cat <project>/.qa-agent/state/knowledge_graph.json | jq -r .project_summary`
+Then `cat "${PROJECT_ROOT}/.qa-agent/state/knowledge_graph.json" | jq -r .project_summary`
 and report the summary plus risk highlights.
 
 ### "rerun tests", "הרץ שוב"
 Ask the user which scope (`changed`, `failed`, `flaky`, `all`) if it's
 ambiguous, otherwise default to `changed`.
 ```bash
-qa-agent rerun --scope changed --project "${PWD}"
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" rerun --scope changed --project "${PROJECT_ROOT}"
 ```
 
 ### "open qa report", "פתח דוח qa"
 ```bash
-qa-agent report --open --project "${PWD}"
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" report --open --project "${PROJECT_ROOT}"
 ```
 
 ## When the CLI fails
 
-- Read `<project>/.qa-agent/runs/<latest>/run.json` and the last log line.
+- Read `${PROJECT_ROOT}/.qa-agent/runs/<latest>/run.json` and the last log line.
 - If a phase is missing in state, run only that phase, not the whole pipeline.
+- If the wrapper itself errors with "Python 3.11+ required", tell the
+  user to install Python 3.11+ and re-run.
 - Never bypass with raw shell. If the CLI cannot do it, say so and
   recommend the user open an issue.
 

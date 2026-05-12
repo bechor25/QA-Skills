@@ -14,17 +14,22 @@ FailureCategory = Literal[
     "selector",
     "timeout",
     "missing-dependency",
+    "import-path",
     "auth",
     "assertion",
     "syntax",
     "unknown",
 ]
 
+# Order matters — first match wins. `import-path` precedes the generic
+# `missing-dependency` so the more specific fix can be attempted first.
 _PATTERNS: list[tuple[FailureCategory, re.Pattern[str]]] = [
     ("selector",
      re.compile(r"locator\(.*\) (?:not found|did not (?:resolve|match))|no element matches selector", re.IGNORECASE)),
     ("timeout",
      re.compile(r"timeout|timed out|exceeded.*ms", re.IGNORECASE)),
+    ("import-path",
+     re.compile(r"Cannot find module\s+['\"](?:\.{1,2}/|/)", re.IGNORECASE)),
     ("missing-dependency",
      re.compile(r"ModuleNotFoundError|Cannot find module|ImportError|command not found", re.IGNORECASE)),
     ("auth",

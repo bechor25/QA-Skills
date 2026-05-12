@@ -20,6 +20,7 @@ from ...report.renderer import render_html
 from ...runtime.install_manager import run_installs
 from ...runtime.install_planner import plan_installs
 from ...runtime.workspace import new_workspace
+from ...scanners.api_scanner import scan_api
 from ...shared.logging import get_logger
 from ...shared.paths import project_root
 from ...state.manager import StateManager
@@ -40,15 +41,21 @@ def run(args: argparse.Namespace) -> int:
     log.info("full-run: workspace=%s", ws.root)
 
     strategy = sm.strategy()
-    scenarios = build_baseline_scenarios(strategy)
+    pm = sm.project_map()
+    api = scan_api(project, pm)
+    scenarios = build_baseline_scenarios(strategy, api=api)
     sm.save(scenarios)
     log.info("full-run: scenarios saved (%d)", len(scenarios.entries))
 
-    pm = sm.project_map()
     generated, critique = run_generation_loop(root, scenarios, pm)
     sm.save(generated)
     sm.save(critique)
     log.info("full-run: generated=%d critique_avg=%.1f", len(generated.entries), _avg([r.score for r in critique.results]))
+
+    # Filter out files that the critic flagged as unrunnable (score <= 2).
+    skipped = _filter_unrunnable(generated, critique)
+    if skipped:
+        log.warning("full-run: skipping %d test file(s) due to critic score <= 2", len(skipped))
 
     skip_exec = bool(getattr(args, "no_llm", False))  # use --no-llm as proxy for offline runs
     if skip_exec:
@@ -101,3 +108,16 @@ def _collect_failure_logs(results) -> list[tuple[str, str]]:
 
 def _avg(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
+
+
+def _filter_unrunnable(generated, critique) -> list[str]:
+    """Mutate `generated.entries` in place to drop files with score <= 2.
+
+    Returns the list of dropped paths so callers can log them.
+    """
+    bad_paths = {r.test_path for r in critique.results if r.score <= 2.0}
+    if not bad_paths:
+        return []
+    keep = [e for e in generated.entries if e.path not in bad_paths]
+    generated.entries = keep
+    return sorted(bad_paths)

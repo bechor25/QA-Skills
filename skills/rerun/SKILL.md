@@ -20,7 +20,7 @@ If unclear, default to `changed`.
 
 ## Hand off
 
-> Run `qa-agent rerun --scope <chosen> --project "${PWD}"`. Then read the
+> Run `${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run rerun --scope <chosen> --project "${PROJECT_ROOT}"`. Then read the
 > last log line for the failed count and surface the per-category breakdown
 > from `state/execution_history.json` (last `run_id` only).
 
