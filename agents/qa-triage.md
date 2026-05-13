@@ -80,6 +80,28 @@ Cap at 4 files / ~1500 lines. Triage is fast or it is wasted.
 
 ## Decision rules
 
+**Always check infra patterns first.** The per-test log is the
+fastest way to recognize an environmental block (env var missing,
+dep missing, dev server down). Misclassifying these as `test-bug`
+leads to wasted edits that cannot improve the outcome.
+
+### Infra patterns (read these from the log before anything else)
+
+| Pattern in log                                                                | Verdict | Action                                                                    |
+|--------------------------------------------------------------------------------|---------|---------------------------------------------------------------------------|
+| `process.exit unexpectedly called` (vitest)                                    | `infra` | `halt`. Reason: the app's env validator killed the process during import. Tell the operator which var(s) the validator flagged — the line above the `process.exit` typically prints them (e.g. `JWT_SECRET: Required`). |
+| `Cannot find module "..."` / `Error [ERR_MODULE_NOT_FOUND]`                    | `infra` | `halt`. Reason: missing dep. Suggest installing the package named in the message. |
+| `EADDRINUSE` / `port already in use`                                           | `infra` | `halt`. Reason: port collision. Tell the operator to free the port. |
+| `ECONNREFUSED <host>:<port>` matching a DB / Redis / dev-server URL            | `infra` | `halt`. Reason: backing service not running. |
+| `0 tests collected` + file-level error (no `assertionResults`)                  | `infra` | `halt`. The file failed to load — fix the load error first; tests never ran. |
+| `Failed to load url ...test-env.setup.ts`                                       | `infra` | `halt`. The vitest setup file was removed by hand; re-run `qa-skills-run scaffold` to regenerate. |
+| Timeout, ECONNRESET, intermittent connection drop after some passes            | `flaky` | `retry_only`. |
+
+Only proceed to the verdict table below once you have ruled out
+every infra pattern above.
+
+### Non-infra patterns
+
 - **5xx + handler throws or returns 500 unconditionally** → `prod-bug`.
 - **4xx but test expected 2xx**: compare request body to contract's
   request schema. If the test's body fails validation → `test-bug`.
@@ -87,12 +109,34 @@ Cap at 4 files / ~1500 lines. Triage is fast or it is wasted.
 - **Status matches but body shape differs**: if the actual body still
   satisfies the contract's `response_*xx.body_schema` → `test-bug`
   (assertion too strict). Otherwise → `prod-bug`.
-- **Timeout, ECONNRESET, port already in use** → `infra`.
 - **Passed previously, fails now, no code change between runs** →
   `flaky`. Use `state/execution_history.json` to check the previous
   result for the same `test_id`.
 - **Cannot decide with confidence ≥ 0.6** → `flaky` with action
   `retry_only`. Never invent a fix you are not sure about.
+
+### `infra` action shape
+
+Infra verdicts have no test fix. Emit:
+
+```json
+{
+  "verdict": "infra",
+  "confidence": 0.95,
+  "evidence": {
+    "log_excerpt": "<the line(s) you read from the per-test log>",
+    "code_location_at_fault": "<file:line where the kill/import error originated>"
+  },
+  "action": {
+    "type": "halt",
+    "summary": "Set DATABASE_URL and JWT_SECRET before running run-tests, or edit tests/qa-agent/test-env.setup.ts."
+  }
+}
+```
+
+Never edit a test file when verdict is `infra`. Tests cannot be the
+cause of a process killed during module init; the issue lives
+outside the test layer.
 
 ## What to emit
 

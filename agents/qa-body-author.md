@@ -95,6 +95,39 @@ If you cannot author a body, leave the stub in place and append an
 - **No comments restating the scenario.** The scenario id at the top
   of the file is the trace; do not repeat its steps as inline comments.
 
+### Hook-scope rule (jest / vitest / mocha)
+
+When a value created in `beforeEach` is consumed in `afterEach` or
+inside an `it()` block, declare it as `let` at the **describe** scope.
+A `const` declared inside one hook is invisible to another hook —
+`const fx = await useApiFixtures(app)` inside `beforeEach` then
+`await fx.cleanup()` inside `afterEach` is a guaranteed
+`ReferenceError`.
+
+✗ Wrong:
+```ts
+describe("auth — api", () => {
+  beforeEach(async () => {
+    const fx = await useApiFixtures(app);   // scoped to this block only
+  });
+  afterEach(async () => {
+    await fx.cleanup();   // ReferenceError: fx is not defined
+  });
+});
+```
+
+✓ Right:
+```ts
+describe("auth — api", () => {
+  let fx: Awaited<ReturnType<typeof useApiFixtures>>;
+  beforeEach(async () => { fx = await useApiFixtures(app); });
+  afterEach(async () => { await fx.cleanup(); });
+});
+```
+
+For pytest, the equivalent is to use a module- or class-scoped
+fixture rather than a function-scoped helper variable.
+
 ## Body rules — by category
 
 ### api
@@ -113,6 +146,16 @@ If you cannot author a body, leave the stub in place and append an
   fall back to `getByRole({name})` with the visible label.
 - Assert visible end-state (text, URL, role) — never internal state.
 - Wait for network idle or specific responses, not arbitrary timeouts.
+- **Assume the page already has a logged-in session.** The Playwright
+  config loads `storage-state.json` automatically; UI tests start
+  authenticated. Do **not** call `page.goto('/login')`, do **not**
+  fill a username/password form, and do **not** write your own auth
+  flow. If the scenario specifically tests the login flow, that is an
+  `auth/api` scenario, not a `ui` scenario — leave it to the API body.
+  If you ever need an explicitly unauthenticated context inside a UI
+  test, override with
+  ``test.use({ storageState: { cookies: [], origins: [] } })`` at the
+  describe level — never by clearing cookies manually.
 
 ### security
 - Build on the api category, but assert the **negative** outcome:
