@@ -74,7 +74,40 @@ dispatch sub-agents.
 | 9  | triage               | AGENT | `critique/<test_id>.json`                   |
 | 10 | report               | CLI   | `report.html`                               |
 
-## Step-by-step
+## Resume detection — run before any phase
+
+Before kicking off phase 1, **always** check whether the project
+already carries enough state to resume from a later phase. A fresh
+run wastes hours of LLM time when the previous run only failed late.
+
+```bash
+STATE="${PROJECT_ROOT}/.qa-agent/state"
+[ -d "$STATE/contracts" ] && CONTRACTS=$(ls "$STATE/contracts" | wc -l) || CONTRACTS=0
+[ -d "$STATE/scenarios" ] && SCENARIOS=$(ls "$STATE/scenarios" | wc -l) || SCENARIOS=0
+[ -f "$STATE/generated_tests.json" ] && SCAFFOLDED=$(jq '.entries | length' "$STATE/generated_tests.json" 2>/dev/null || echo 0) || SCAFFOLDED=0
+[ -d "${PROJECT_ROOT}/tests/qa-agent" ] && STUBS=$(grep -rln 'QA-AGENT-BODY' "${PROJECT_ROOT}/tests/qa-agent/" 2>/dev/null | wc -l) || STUBS=0
+echo "resume: contracts=$CONTRACTS scenarios=$SCENARIOS scaffolded=$SCAFFOLDED stubs=$STUBS"
+```
+
+Decision matrix (highest-priority match wins):
+
+| Signal                                                              | Start at phase |
+|---------------------------------------------------------------------|----------------|
+| `stubs > 0` and `scaffolded > 0`                                    | **7** (body-author) |
+| `scenarios > 0` and `scaffolded == 0`                               | **6** (scaffold) |
+| `contracts > 0` and `scenarios == 0`                                | **5** (scenarios) |
+| `state/capability_map.json` exists and `contracts == 0`             | **4** (enrich) |
+| `state/raw_capability_map.json` exists and no `capability_map.json` | **3b** (mapper) |
+| Nothing above                                                       | **1** (fresh) |
+
+**Skip ahead, never repeat.** Re-running phase 6 (scaffold) wipes any
+existing test bodies — the file overwrite is the wipe. Only fire it
+if `scaffolded == 0` or if the user explicitly asks for a clean
+rebuild.
+
+When you skip phases, announce it in one short line so the user sees
+what was reused: ``resume: contracts (15) + scenarios (15) + stubs
+(332) detected — starting at phase 7``.
 
 ### Phases 1–3a (CLI)
 

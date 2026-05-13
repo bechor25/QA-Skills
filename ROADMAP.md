@@ -1,344 +1,209 @@
-# QA Agent — Implementation Roadmap
+# QA Agent — Current Architecture Roadmap
 
-> Master task list. Updated after every completed task.
-> Source-of-truth for project progress. Tasks marked `[x]` are done; `[ ]` are pending; `[~]` are in progress.
+> Living source of truth for the implemented architecture, state model, and pipeline flow.
+> This document reflects the code that exists in this repository today.
 
 ## 0. Project identity
 
-- **Name:** QA Agent (a.k.a. QA Operating System)
-- **Form factor:** Claude Code plugin (installable via `claude plugin install qa-skills`). All entry points are Skills + a single QA Master Agent. The plugin ships a Python package (`qa_agent`) that does the heavy lifting; agents/skills delegate to it via `${CLAUDE_PLUGIN_ROOT}/qa_agent/...`.
-- **Primary language:** Python 3.11+. Node is used **only** where mandatory (Playwright, ts-morph). Java/Maven/Gradle/pytest/jest are invoked as subprocesses inside the target project.
-- **Execution model:** local subprocess execution (no Docker in v1). All runs are sandboxed to a per-run workspace directory under `.qa-agent/runs/<run-id>/`.
-- **Runtime contract:** the LLM **never** runs shell commands. The Agent decides; Python executors do. The plugin is structured so reasoning and execution are physically separate processes.
+- **Name:** QA Agent / QA Skills
+- **Form factor:** Claude Code plugin.
+- **Canonical entry point:** `skills/test-orchestrator/SKILL.md`.
+- **Legacy note:** the old `qa-master` concept is no longer the primary orchestration layer. The top-level Claude run drives the pipeline directly through the `test-orchestrator` skill.
+- **Primary language:** Python 3.11+.
+- **Node usage:** only where needed by the implementation stack, mainly Playwright, `ts-morph`, and JS test harnesses.
+- **Execution model:** local subprocess execution with per-run isolation under `.qa-agent/runs/<run-id>/`.
+- **Runtime contract:** LLMs plan, critique, and author bounded artifacts. Python code scans, writes state, plans installs, executes tests, and renders reports.
 
-## 1. Principles
+## 1. System principles
 
-1. **Single brain.** One agent (`qa-master`) orchestrates. All other "agents" are stateless skills/tools.
-2. **Reasoning vs. execution.** LLM does planning, scenario design, risk reasoning, critique. Python does scanning, parsing, installs, test runs, reporting, state.
-3. **State first.** Everything persistent lives in `.qa-agent/state/*.json`. Every phase reads and writes state — never in-memory passing across phase boundaries.
-4. **Knowledge Graph, not raw code.** The scanner emits a hierarchical KG (project → modules → features → symbols). Prompts get summaries + targeted slices, never blobs of source.
-5. **Risk-driven coverage.** Tests target risk-weighted flows, not endpoints.
-6. **Incremental by default.** A re-run scopes to changed modules via git diff + dependency graph.
-7. **Honest reports.** Reports are built from state files only. There is no path where the LLM produces a quality score.
+1. **Single orchestration surface.** The `test-orchestrator` skill coordinates the end-to-end run.
+2. **Deterministic state first.** The CLI and agents exchange data through JSON state files under `.qa-agent/state/`.
+3. **Reasoning vs. execution.** LLM agents work on contracts, scenarios, bodies, mapping, and triage; Python handles scanning and execution.
+4. **Scoped reads.** Agents read only the state and source files that their role requires.
+5. **Grouped generation.** Scaffolds and bodies are grouped by `(capability, category)` so edits stay bounded.
+6. **Conservative healing.** Fixes are limited to deterministic, bounded mutations.
+7. **Reports are derived, not invented.** `report/builder.py` reads state files; the report is not handwritten by the model.
 
-## 2. High-level architecture
+## 2. Architecture overview
 
-```
-            ┌─────────────────────────────────────────────┐
-            │            Claude Code (chat)               │
-            │  user types: "run qa" / "צור בדיקות"      │
-            └────────────────┬────────────────────────────┘
-                             ▼
-            ┌─────────────────────────────────────────────┐
-            │   Skill: test-orchestrator (entry)          │
-            └────────────────┬────────────────────────────┘
-                             ▼
-            ┌─────────────────────────────────────────────┐
-            │   Agent: qa-master  (single brain)          │
-            │   - planning, reasoning, critique only      │
-            └────────────────┬────────────────────────────┘
-                             ▼
-            ┌─────────────────────────────────────────────┐
-            │   qa_agent CLI  (Python, subprocess)        │
-            │     qa-agent full-run | analyze | rerun     │
-            └────────────────┬────────────────────────────┘
-       ┌─────────────────────┼──────────────────────┐
-       ▼                     ▼                      ▼
- ┌──────────┐         ┌───────────┐          ┌──────────────┐
- │ Scanners │         │  Engines  │          │   State JSON │
- │ Parsers  │         │  Quality  │          │   .qa-agent/ │
- │ Context  │         │  Strategy │          │              │
- └────┬─────┘         └─────┬─────┘          └──────────────┘
-      │                     ▼
-      │              ┌────────────┐
-      │              │ Executors  │
-      │              │ Runtime    │
-      │              └─────┬──────┘
-      ▼                    ▼
- ┌──────────────────────────────────────────────────────┐
- │                    Report Engine                     │
- │           HTML enterprise report                     │
- └──────────────────────────────────────────────────────┘
+```text
+Claude Code chat
+  └─> skills/test-orchestrator/SKILL.md
+        ├─> CLI phases via bin/qa-skills-run
+        │     ├─ prepare
+        │     ├─ build-strategy
+        │     ├─ scaffold
+        │     ├─ run-tests
+        │     ├─ retry-decide
+        │     ├─ rerun
+        │     └─ report
+        └─> LLM sub-agents
+              ├─ qa-capability-mapper
+              ├─ qa-enricher
+              ├─ qa-scenario-author
+              ├─ qa-body-author
+              └─ qa-triage
+
+CLI / agents
+  ├─ scanners / parsers / context
+  ├─ quality (risk, strategy, generation loop, validators)
+  ├─ generators / harness
+  ├─ runtime / executors / healing / flaky
+  ├─ state manager + schemas
+  └─ report builder + renderer
 ```
 
-## 3. Directory layout
+## 3. Repository layout
 
-```
-QA-Skills/                             # plugin root
-├── .claude-plugin/                    # plugin manifest (kept)
+```text
+QA-Skills/
+├── bin/
+│   └── qa-skills-run
 ├── agents/
-│   └── qa-master.md                   # single orchestrator agent
+│   ├── qa-capability-mapper.md
+│   ├── qa-body-author.md
+│   ├── qa-enricher.md
+│   ├── qa-scenario-author.md
+│   └── qa-triage.md
 ├── skills/
-│   ├── test-orchestrator/SKILL.md     # entry point ("run qa")
 │   ├── analyze-project/SKILL.md
 │   ├── rerun/SKILL.md
+│   ├── test-orchestrator/SKILL.md
 │   └── view-report/SKILL.md
-├── qa_agent/                          # Python package (the engine)
-│   ├── __init__.py
-│   ├── cli/                           # qa-agent CLI
-│   │   ├── __main__.py
-│   │   └── commands/
-│   │       ├── full_run.py
-│   │       ├── analyze.py
-│   │       ├── rerun.py
-│   │       └── report.py
-│   ├── agent/                         # orchestration policy
-│   │   ├── orchestrator.py
-│   │   ├── planner.py
-│   │   ├── retry_engine.py
-│   │   ├── lifecycle.py
-│   │   └── execution_controller.py
-│   ├── scanners/
-│   │   ├── filesystem.py
-│   │   ├── tech_stack.py
-│   │   ├── ast_scanner.py
-│   │   ├── dependency.py
-│   │   ├── api_scanner.py
-│   │   └── ui_scanner.py
-│   ├── parsers/
-│   │   ├── tree_sitter_loader.py
-│   │   ├── ts_morph_bridge.py        # subprocess to Node helper
-│   │   ├── python_ast.py
-│   │   └── semantic.py
-│   ├── context/
-│   │   ├── kg_builder.py             # knowledge graph
-│   │   ├── summarizer.py
-│   │   ├── chunking.py
-│   │   └── relevance.py
-│   ├── quality/
-│   │   ├── risk_engine.py
-│   │   ├── strategy_builder.py
-│   │   ├── scenario_generator.py
-│   │   ├── coverage_intelligence.py
-│   │   ├── assertion_validator.py
-│   │   ├── selector_validator.py
-│   │   ├── test_critic.py
-│   │   └── learning_engine.py
-│   ├── generators/
-│   │   ├── ui_tests.py               # Playwright
-│   │   ├── api_tests.py
-│   │   ├── security_tests.py         # OWASP-aligned
-│   │   ├── accessibility_tests.py    # axe / lighthouse
-│   │   ├── performance_tests.py
-│   │   └── regression_tests.py
-│   ├── executors/
-│   │   ├── base.py
-│   │   ├── pytest_runner.py
-│   │   ├── jest_runner.py
-│   │   ├── playwright_runner.py
-│   │   ├── maven_runner.py
-│   │   ├── gradle_runner.py
-│   │   ├── security_runner.py
-│   │   └── a11y_runner.py
-│   ├── runtime/
-│   │   ├── sandbox.py                # workspace isolation
-│   │   ├── install_planner.py        # decides what to install
-│   │   ├── install_manager.py        # npm/pnpm/pip/maven/gradle
-│   │   ├── workspace.py
-│   │   └── process_manager.py
-│   ├── flaky/
-│   │   ├── detector.py
-│   │   └── classifier.py
-│   ├── healing/
-│   │   ├── engine.py
-│   │   ├── policies.py
-│   │   └── classifiers.py            # selector / timeout / dep / auth / flaky
-│   ├── state/
-│   │   ├── manager.py
-│   │   ├── schemas.py                # pydantic models
-│   │   └── migrations.py
-│   ├── report/
-│   │   ├── builder.py                # builds report-data.json (pure data)
-│   │   ├── renderer.py               # HTML render
-│   │   └── templates/
-│   └── shared/
-│       ├── logging.py
-│       ├── errors.py
-│       ├── paths.py
-│       ├── jsonio.py
-│       └── git.py
-├── prompts/                          # LLM prompt templates (string files)
-│   ├── strategy.md
-│   ├── scenario.md
-│   ├── critic.md
-│   └── ...
-├── templates/                        # test scaffolding templates
-│   ├── playwright/
-│   ├── pytest/
-│   ├── jest/
-│   └── security/
+├── qa_agent/
+│   ├── agent/                # lifecycle, planner, retries, execution control
+│   ├── cli/                  # argparse entry point and subcommands
+│   ├── context/              # KG, summaries, relevance, app entry
+│   ├── executors/            # pytest, jest, vitest, playwright, maven, gradle
+│   ├── flaky/                # detection + classification
+│   ├── generators/           # api/ui/security/a11y/perf/regression + harness
+│   ├── healing/              # bounded auto-fix logic
+│   ├── parsers/              # tree-sitter, python AST, ts-morph bridge
+│   ├── quality/              # capability discovery, risk, strategy, critic
+│   ├── report/               # report data + HTML rendering
+│   ├── runtime/               # workspace, process, install planner/manager
+│   ├── scanners/             # filesystem, tech stack, api, ui, selectors
+│   ├── shared/               # logging, paths, config, JSON, errors, git
+│   ├── state/                # schemas + typed state manager
+│   └── tests/
 ├── configs/
-│   ├── defaults.yaml
-│   └── language-policies.yaml
-├── reports/                          # HTML report template (Jinja)
+│   └── defaults.yaml
+├── prompts/
+│   ├── critic.md
+│   ├── scenario.md
+│   └── strategy.md
+├── reports/
 │   └── enterprise.html.j2
-├── pyproject.toml
-├── README.md
-├── USAGE.md
-├── AGENT.md
-└── CHANGELOG.md
+└── README.md / USAGE.md / AGENT.md / CHANGELOG.md
 ```
 
-## 4. State files
+## 4. State model
 
-Stored in `<project>/.qa-agent/`.
+All persistent state lives under `<project>/.qa-agent/state/`. The state manager is the only supported read/write path.
 
-| File                          | Owner       | Purpose                                      |
-|-------------------------------|-------------|----------------------------------------------|
-| `state/project_map.json`      | scanners    | files, languages, frameworks                 |
-| `state/dependency_graph.json` | scanners    | per-module imports                           |
-| `state/knowledge_graph.json`  | context     | project → module → feature → symbol          |
-| `state/risk_matrix.json`      | risk engine | per-flow risk score + rationale              |
-| `state/strategy.json`         | strategy    | planned test categories per flow             |
-| `state/scenarios.json`        | scenario    | LLM-generated test scenarios                 |
-| `state/generated_tests.json`  | generators  | file paths + meta of created tests           |
-| `state/critique.json`         | critic      | per-test critique results                    |
-| `state/execution_history.json`| executors   | every run, exit codes, durations             |
-| `state/installation_history.json` | runtime | every install attempt + outcome              |
-| `state/flaky_state.json`      | flaky       | flaky classifications                        |
-| `state/coverage_history.json` | report      | feature/risk coverage over time              |
-| `state/learnings.json`        | learning    | promoted patterns across runs                |
-| `runs/<id>/`                  | orchestrator| per-run artifacts (logs, reports, checkpoints)|
+| File | Owner | Purpose |
+|---|---|---|
+| `project_map.json` | scanners | file inventory, languages, frameworks, test runners |
+| `dependency_graph.json` | scanners | module graph and imports |
+| `knowledge_graph.json` | context | project summary, module summaries, features |
+| `risk_matrix.json` | quality | capability risk scores and rationale |
+| `raw_capability_map.json` | quality | deterministic capability clusters |
+| `capability_map.json` | `qa-capability-mapper` | refined capability list |
+| `strategy.json` | quality | planned categories per capability |
+| `ui_selectors.json` | scanners | capability-scoped UI selectors |
+| `test_data_plan.json` | runtime | detected fixture / seed strategy |
+| `contracts/<capability>.json` | `qa-enricher` | capability contract |
+| `scenarios/<capability>.json` | `qa-scenario-author` | rich scenario list |
+| `generated_tests.json` | generators | scenario-to-file mapping |
+| `critique/<test_id>.json` | `qa-triage` | per-failure verdict |
+| `execution_history.json` | executors | all runs and results |
+| `installation_history.json` | runtime | install attempts and outcomes |
+| `flaky_state.json` | flaky | flaky classifications |
+| `retry_budget.json` | agent | retry attempts per test |
+| `runs/<run-id>/` | workspace | logs, artifacts, report data, HTML report |
 
 ## 5. CLI surface
 
+```text
+qa-agent analyze        [--project PATH]
+qa-agent prepare        [--project PATH]
+qa-agent build-strategy [--project PATH]
+qa-agent scaffold       [--project PATH]
+qa-agent run-tests      [--project PATH] [--skip-install] [--timeout SECONDS]
+qa-agent retry-decide   [--project PATH]
+qa-agent rerun          [--project PATH] [--scope flaky|changed|failed|all]
+qa-agent report         [--project PATH] [--open]
+qa-agent state          [--project PATH] show|reset
+qa-agent full-run       [--project PATH] [--categories ...] [--no-llm]
+qa-agent --version
 ```
-qa-agent full-run [--project PATH] [--categories ui,api,security,...] [--no-llm]
-qa-agent analyze [--project PATH]
-qa-agent rerun [--project PATH] [--scope flaky|changed|failed|all]
-qa-agent report [--project PATH] [--open]
-qa-agent state [--project PATH] show|reset
-qa-agent version
-```
 
----
+### What each command does
 
-## Phase 0 — Foundation ✅
+- `analyze`: filesystem scan, tech-stack detection, dependency graph, API/UI scan, knowledge graph, risk matrix, baseline strategy.
+- `prepare`: runs `analyze`, then builds `raw_capability_map.json`, `ui_selectors.json`, and `test_data_plan.json`.
+- `build-strategy`: rebuilds `strategy.json` from `capability_map.json` when present, otherwise falls back to raw clusters or legacy strategy.
+- `scaffold`: groups scenarios by `(capability, category)` and emits one scaffold file per group.
+- `run-tests`: installs dependencies if needed, executes generated suites, and records execution history.
+- `retry-decide`: turns triage and execution history into retry decisions.
+- `rerun`: re-executes a scoped subset of generated tests.
+- `report`: renders the latest HTML report and optionally opens it.
+- `full-run`: legacy convenience path that runs the direct Python engine end-to-end without the multi-agent orchestration flow.
 
-- [x] 0.1 Update `.claude-plugin/plugin.json` with new metadata (version, description, version bump to 2.0.0)
-- [x] 0.2 Add `pyproject.toml` (package name `qa_agent`, entry point `qa-agent`)
-- [x] 0.3 Add `.gitignore` (Python, node_modules, .qa-agent/, runs/, .venv)
-- [x] 0.4 Create `qa_agent/__init__.py` with version constant
-- [x] 0.5 Create `qa_agent/shared/` utilities: logging, errors, paths, jsonio, git
-- [x] 0.6 Create `qa_agent/state/` — schemas (pydantic), manager (load/save/atomic write), migrations
-- [x] 0.7 Create `qa_agent/cli/__main__.py` with `argparse` dispatch
-- [x] 0.8 Stub CLI commands: `full_run`, `analyze`, `rerun`, `report`, `state`, `version`
-- [x] 0.9 Create `configs/defaults.yaml` + loader in `shared/`
-- [x] 0.10 Create root `README.md`, `AGENT.md`, `USAGE.md`, `CHANGELOG.md`
+## 6. Canonical pipeline
 
-## Phase 1 — Scanning & Context ✅
+The current orchestration model is the skill-driven pipeline below.
 
-- [x] 1.1 `scanners/filesystem.py` — walk project, classify files by language, detect ignored paths
-- [x] 1.2 `scanners/tech_stack.py` — detect frameworks (Express, FastAPI, Spring, Next.js, Django, NestJS, Flask, etc.) from manifests + signature files
-- [x] 1.3 `parsers/python_ast.py` — extract symbols, routes, fixtures from Python files
-- [x] 1.4 `parsers/tree_sitter_loader.py` — lazy load grammars for js/ts/python/java
-- [x] 1.5 `parsers/ts_morph_bridge.py` — Node helper script (`qa_agent/parsers/_node/ts_morph_extract.js`) invoked via subprocess
-- [x] 1.6 `scanners/dependency.py` — parse `package.json`, `pyproject.toml`, `requirements*.txt`, `pom.xml`, `build.gradle*`
-- [x] 1.7 `scanners/api_scanner.py` — derive route maps (Express routers, FastAPI routers, Spring `@RestController`, Next.js route handlers)
-- [x] 1.8 `scanners/ui_scanner.py` — collect Next.js / Vite / CRA / Vue routes, detect Playwright targets
-- [x] 1.9 `context/kg_builder.py` — build hierarchical KG from scanner outputs
-- [x] 1.10 `context/summarizer.py` — produce per-module + per-feature text summaries (no LLM)
-- [x] 1.11 `context/chunking.py` — split summaries into prompt-safe slices
-- [x] 1.12 `context/relevance.py` — given a feature/flow, return relevant module IDs ranked
-- [x] 1.13 Wire `qa-agent analyze` to run Phase 1 end-to-end and write all state files
-- [x] 1.14 Unit tests for scanners + KG builder against fixture repos (TS+Python)
+| Phase | Owner | Input | Output |
+|---|---|---|---|
+| 1 | CLI | project root | `project_map.json`, `dependency_graph.json` |
+| 2 | CLI | scanner outputs | `knowledge_graph.json`, `risk_matrix.json` |
+| 3a | CLI | project map + KG | `raw_capability_map.json`, `ui_selectors.json`, `test_data_plan.json` |
+| 3b | Agent | raw capability map + KG | `capability_map.json` |
+| 3c | CLI | refined capabilities + risk | `strategy.json` |
+| 4 | Agent | capability map + strategy | `contracts/<cap>.json` |
+| 5 | Agent | contracts + strategy + risk | `scenarios/<cap>.json` |
+| 6 | CLI | scenarios | scaffolded test files + `generated_tests.json` |
+| 7 | Agent | scaffolded files + scenarios | filled-in test bodies |
+| 8 | CLI | generated tests | execution history + logs |
+| 9 | Agent | failing tests + logs + contracts | `critique/<test_id>.json` |
+| 10 | CLI | history + critique | retry decisions, reruns, report |
 
-## Phase 2 — Intelligence (Risk + Strategy) ✅
+## 7. Implemented layers
 
-- [x] 2.1 `quality/risk_engine.py` — capability detection (auth, payments, mutation flows, permissions, data export, file upload)
-- [x] 2.2 Risk scoring: business impact × state complexity × security exposure × change frequency (from git log)
-- [x] 2.3 Write `state/risk_matrix.json` with per-capability score + rationale
-- [x] 2.4 `quality/strategy_builder.py` — LLM-backed builder that emits planned test categories per capability
-- [x] 2.5 Prompts: `prompts/strategy.md` with strict JSON schema
-- [x] 2.6 Strategy validator: every entry references a real capability, totals within token cap
-- [x] 2.7 Write `state/strategy.json`
-- [x] 2.8 `quality/coverage_intelligence.py` — feature/risk coverage (not line coverage)
+- **Scanners:** filesystem, tech stack, dependency graph, API routes, UI routes, UI selectors.
+- **Parsers:** tree-sitter loader, Python AST parsing, `ts-morph` bridge.
+- **Context:** knowledge graph builder, summarizer, chunking, relevance, app entry detection.
+- **Quality:** capability discovery, risk engine, strategy builder, scenario generator, generation loop, assertion and selector validators.
+- **Generators:** API, UI, security, accessibility, performance, regression, plus scaffold/harness support.
+- **Executors:** pytest, jest, vitest, playwright, maven, gradle, security, a11y.
+- **Runtime:** isolated workspaces, process control, install planner, install manager, test data detection.
+- **Healing / flaky:** bounded auto-fix, failure classification, flaky detection, retry budgeting.
+- **Reporting:** state-driven data builder and HTML renderer.
 
-## Phase 3 — Test Generation ✅
+## 8. Current status
 
-- [x] 3.1 `quality/scenario_generator.py` — LLM-backed; emits `scenarios.json` per capability
-- [x] 3.2 `quality/test_critic.py` — LLM critic with rubric (assertions, duplicates, selectors, depth)
-- [x] 3.3 `generators/api_tests.py` — emit pytest/jest API test files from scenarios
-- [x] 3.4 `generators/ui_tests.py` — emit Playwright test files (TS)
-- [x] 3.5 `generators/security_tests.py` — OWASP-aligned (auth, IDOR, injection, CSRF, XSS)
-- [x] 3.6 `generators/accessibility_tests.py` — axe-core via Playwright
-- [x] 3.7 `generators/performance_tests.py` — smoke perf (lighthouse + simple load)
-- [x] 3.8 `generators/regression_tests.py` — flow re-execution based on history
-- [x] 3.9 `quality/assertion_validator.py` — static check: no `expect(true).toBe(true)` / `assert True` / shallow asserts
-- [x] 3.10 `quality/selector_validator.py` — for UI: prefer `data-testid`, reject brittle XPath
-- [x] 3.11 Generation loop: scenario → generate → critique → improve → validate → write
+### Stable and aligned
 
-## Phase 4 — Execution ✅
+- `skills/test-orchestrator/SKILL.md` is the top-level orchestration contract.
+- `qa_agent/cli/__main__.py` exposes the real command surface used by the skill.
+- `qa_agent/state/schemas.py` includes the sharded contract/scenario models and the richer scenario shape.
+- `qa_agent/state/manager.py` already registers the new sharded state files.
+- `qa_agent/generators/scaffolds.py` and `qa_agent/cli/commands/scaffold.py` group by `(capability, category)`.
+- `qa_agent/cli/commands/prepare.py` is the bridge from scan/analyze to capability discovery.
+- `qa_agent/cli/commands/build_strategy.py` prefers the refined capability map and falls back safely.
+- `qa_agent/cli/commands/run_tests.py`, `retry_decide.py`, `rerun.py`, and `report.py` cover the execution/reporting loop.
 
-- [x] 4.1 `runtime/workspace.py` — per-run isolated workspace under `.qa-agent/runs/<id>/`
-- [x] 4.2 `runtime/process_manager.py` — subprocess wrapper with timeout, capture, kill-tree
-- [x] 4.3 `runtime/install_planner.py` — decide what to install based on tech stack
-- [x] 4.4 `runtime/install_manager.py` — pm dispatch (npm/pnpm/pip/poetry/maven/gradle), records to `installation_history.json`
-- [x] 4.5 `executors/base.py` — common Executor interface, result schema
-- [x] 4.6 `executors/pytest_runner.py`
-- [x] 4.7 `executors/jest_runner.py`
-- [x] 4.8 `executors/playwright_runner.py` (browser install handled by install manager)
-- [x] 4.9 `executors/maven_runner.py`
-- [x] 4.10 `executors/gradle_runner.py`
-- [x] 4.11 `executors/security_runner.py` (e.g., zap-baseline, semgrep)
-- [x] 4.12 `executors/a11y_runner.py` (axe via playwright)
-- [x] 4.13 `agent/execution_controller.py` — orchestrates executor selection, batches, retries
-- [x] 4.14 Append `execution_history.json` for every run
+### Legacy or historical
 
-## Phase 5 — Quality (Flaky + Self-Healing) ✅
+- `qa-master` appears in older prose and historical notes, but it is no longer the canonical orchestrator.
+- `qa-agent full-run` remains as a direct engine path for convenience and compatibility.
+- Older documentation may still describe the pre-sharded or pre-skill flow; keep those docs synchronized with this roadmap.
 
-- [x] 5.1 `flaky/detector.py` — re-run failed/borderline tests N times, classify stability
-- [x] 5.2 `flaky/classifier.py` — timing / network / env / race / order-dependent
-- [x] 5.3 Write `flaky_state.json`
-- [x] 5.4 `healing/classifiers.py` — classify failure (selector / timeout / dep / auth / flaky / assertion)
-- [x] 5.5 `healing/policies.py` — what may be auto-fixed (max retries, allowed mutations)
-- [x] 5.6 `healing/engine.py` — apply bounded fixes; on failure re-run only the affected suite
-- [x] 5.7 `agent/retry_engine.py` — incremental retry driven by `dependency_graph.json` + git diff
+## 9. Near-term alignment work
 
-## Phase 6 — Reporting ✅
+1. Remove or rewrite any stale references to `qa-master` in user-facing docs.
+2. Keep `README.md`, `USAGE.md`, and `AGENT.md` in sync with the skill-driven pipeline.
+3. Preserve the sharded state contract when adding new phases, files, or agent roles.
+4. Update the roadmap whenever the CLI surface or state schema changes.
 
-- [x] 6.1 `report/builder.py` — pure Python; emits `report-data.json` from state files only
-- [x] 6.2 `reports/enterprise.html.j2` — Jinja template: executive summary, risk coverage map, results, flaky table, critique findings, installation log
-- [x] 6.3 `report/renderer.py` — render Jinja to HTML under runs/<id>/report.html
-- [x] 6.4 Screenshots/video collection from `runs/<id>/artifacts/` (workspace owns artifacts/; Playwright writes there)
-- [x] 6.5 `qa-agent report --open` opens the latest report
-
-## Phase 7 — Agent + Skills ✅
-
-- [x] 7.1 `agents/qa-master.md` — single-brain agent (sonnet); tools: Bash + Read only; hard rule: no direct execution
-- [x] 7.2 `skills/test-orchestrator/SKILL.md` — entry point ("run qa", "צור בדיקות"); shells to `qa-agent full-run` via qa-master
-- [x] 7.3 `skills/analyze-project/SKILL.md` — runs `qa-agent analyze`
-- [x] 7.4 `skills/rerun/SKILL.md` — runs `qa-agent rerun --scope ...`
-- [x] 7.5 `skills/view-report/SKILL.md` — opens latest HTML report
-- [x] 7.6 Prompt templates wired (`prompts/strategy.md`, `scenario.md`, `critic.md` — loaded as templates by the agent; validators in qa_agent/quality/*)
-- [x] 7.7 Bilingual trigger phrases (English + Hebrew) in every skill description
-- [x] 7.8 `agent/planner.py` + `agent/lifecycle.py` — phase enum + plan helpers
-
-## Phase 8 — Polish & Validation ✅
-
-- [x] 8.1 Pytest test suite for `qa_agent/*` — 51 tests passing across 9 test files
-- [x] 8.2 E2E smoke (`tests/test_e2e_smoke.py`) — full-run + report against FastAPI fixture
-- [x] 8.3 `README.md` — install + usage (EN/HE) + full components table
-- [x] 8.4 `USAGE.md` — every CLI command + every skill trigger phrase
-- [x] 8.5 `AGENT.md` — trigger phrases reference (EN + HE)
-- [x] 8.6 `CHANGELOG.md` — v2.0.0 entry covering every phase
-- [x] 8.7 Final pass: tests green, package imports clean
-
----
-
-## Working agreement
-
-- After each task: tick its box in this file, commit, push.
-- Branch: `claude/project-overview-jNTHA`.
-- One feature per commit where reasonable.
-- No task is "done" until its file(s) compile/import cleanly and its state schema (if any) is registered in `qa_agent/state/schemas.py`.
-- Open questions for the user go in the **Decisions log** below.
-
-## Decisions log
-
-| Date       | Decision                                       | Notes |
-|------------|------------------------------------------------|-------|
-| 2026-05-11 | Plugin form (not standalone CLI)               | per user — must install cleanly via Claude Code plugin marketplace |
-| 2026-05-11 | Python primary, Node only for Playwright/ts-morph | per user |
-| 2026-05-11 | No Docker — local execution only               | per user |
-| 2026-05-11 | Drop Go support                                | per user |

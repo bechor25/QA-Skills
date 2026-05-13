@@ -4,69 +4,124 @@
 
 In any project directory, open Claude Code and say:
 
-```
+```text
 run qa
 ```
 
-Claude triggers `qa-agent full-run` and reports back with the HTML report path.
+The `test-orchestrator` skill triggers the full QA flow and returns the path to
+the generated HTML report.
 
 ## CLI reference
 
-### `qa-agent full-run`
-End-to-end pipeline: scan → strategy → generate → execute → report.
-
-```bash
-qa-agent full-run                    # current directory
-qa-agent full-run --project /path    # explicit
-qa-agent full-run --categories ui,api,security
-qa-agent full-run --no-llm           # skip LLM-driven phases (debug only)
-```
-
 ### `qa-agent analyze`
-Scan + knowledge-graph + risk-matrix only. No tests generated.
+
+Scan the project and build the knowledge graph and risk matrix.
 
 ```bash
 qa-agent analyze --project /path
 ```
 
 Outputs:
+
 - `<project>/.qa-agent/state/project_map.json`
 - `<project>/.qa-agent/state/dependency_graph.json`
 - `<project>/.qa-agent/state/knowledge_graph.json`
+- `<project>/.qa-agent/state/risk_matrix.json`
 
-### `qa-agent rerun`
-Re-execute a previously generated suite. Scope controls what runs:
+### `qa-agent prepare`
 
-| Scope     | Re-runs                                                  |
-|-----------|----------------------------------------------------------|
-| `changed` | Tests for modules changed since last run (git diff).     |
-| `failed`  | Only tests that failed in the last run.                  |
-| `flaky`   | Tests marked unstable in `flaky_state.json`.             |
-| `all`     | Everything.                                              |
+Run `analyze`, then discover raw capabilities, UI selectors, and test-data hints.
 
 ```bash
-qa-agent rerun --scope changed
+qa-agent prepare --project /path
+```
+
+Outputs:
+
+- `<project>/.qa-agent/state/raw_capability_map.json`
+- `<project>/.qa-agent/state/ui_selectors.json`
+- `<project>/.qa-agent/state/test_data_plan.json`
+
+### `qa-agent build-strategy`
+
+Rebuild `strategy.json` from the refined capability map.
+
+```bash
+qa-agent build-strategy --project /path
+```
+
+### `qa-agent scaffold`
+
+Group scenarios by `(capability, category)` and emit scaffolded test files.
+
+```bash
+qa-agent scaffold --project /path
+```
+
+### `qa-agent run-tests`
+
+Execute generated suites. Use `--skip-install` when the environment is already prepared.
+
+```bash
+qa-agent run-tests --project /path
+qa-agent run-tests --project /path --skip-install
+qa-agent run-tests --project /path --timeout 300
+```
+
+### `qa-agent retry-decide`
+
+Read execution history and triage verdicts, then print retry decisions as JSON.
+
+```bash
+qa-agent retry-decide --project /path
+```
+
+### `qa-agent rerun`
+
+Re-execute a scoped subset of generated tests.
+
+| Scope | Re-runs |
+|---|---|
+| `changed` | Tests for modules changed since the last run |
+| `failed` | Tests that failed in the latest run |
+| `flaky` | Tests classified as flaky |
+| `all` | Every generated test |
+
+```bash
+qa-agent rerun --project /path --scope changed
 ```
 
 ### `qa-agent report`
+
 Render and optionally open the HTML report.
 
 ```bash
-qa-agent report --open
+qa-agent report --project /path --open
 ```
 
 ### `qa-agent state`
-Inspect or wipe project state.
+
+Inspect or reset project state.
 
 ```bash
-qa-agent state show
-qa-agent state reset
+qa-agent state --project /path show
+qa-agent state --project /path reset
+```
+
+### `qa-agent full-run`
+
+Compatibility path for a direct end-to-end run through the Python engine.
+
+```bash
+qa-agent full-run --project /path
+qa-agent full-run --project /path --categories ui,api,security
+qa-agent full-run --project /path --no-llm
 ```
 
 ## State files
 
-Everything is under `<project>/.qa-agent/state/`. See `ROADMAP.md` §4 for the
-complete table.
+Everything lives under `<project>/.qa-agent/state/`. See `ROADMAP.md` for the
+full file map and ownership table.
 
 ## Configuration
 
