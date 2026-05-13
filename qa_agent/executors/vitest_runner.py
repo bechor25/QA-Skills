@@ -1,4 +1,4 @@
-"""Jest executor — uses `--json` for deterministic result parsing."""
+"""Vitest executor — same JSON shape as jest, different binary."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ from .base import Executor, ExecutionResult
 from .ts_reporter import parse_jest_style_json
 
 
-class JestRunner(Executor):
-    framework = "jest"
+class VitestRunner(Executor):
+    framework = "vitest"
     category = "api"
 
     def available(self, project_root: Path) -> bool:
-        if (project_root / "node_modules" / ".bin" / "jest").exists():
+        if (project_root / "node_modules" / ".bin" / "vitest").exists():
             return True
         return shutil.which("npx") is not None
 
@@ -25,9 +25,6 @@ class JestRunner(Executor):
         cmd = self._command(project_root, test_files)
         proc = run_subprocess(cmd, cwd=project_root, timeout=timeout)
         passed, failed, skipped, records = parse_jest_style_json(proc.stdout_tail, project_root)
-        # When the runner crashes during module resolution / setup,
-        # exit_code is non-zero but no tests run. Surface that as a
-        # counted failure so the healing engine sees it.
         if proc.exit_code not in (0, None) and (passed + failed + skipped) == 0:
             failed = len(test_files)
         return ExecutionResult(
@@ -44,11 +41,16 @@ class JestRunner(Executor):
         )
 
     def _command(self, project_root: Path, files: list[str]) -> list[str]:
-        # Prefer the qa-agent jest config (ts-jest preset) if present so
-        # TS tests run regardless of the project's own jest setup.
-        config = project_root / "jest.qa-agent.config.cjs"
-        local = project_root / "node_modules" / ".bin" / "jest"
-        base = [str(local)] if local.exists() else ["npx", "--yes", "jest"]
+        # Use the qa-agent vitest config so the test glob is scoped to
+        # tests/qa-agent/. Without it, vitest may pick up the project's
+        # own config and run unrelated suites.
+        config = project_root / "tests" / "qa-agent" / "vitest.config.ts"
+        local = project_root / "node_modules" / ".bin" / "vitest"
+        base = [str(local)] if local.exists() else ["npx", "--yes", "vitest"]
+        cmd = [*base, "run", "--reporter=json", "--passWithNoTests"]
         if config.exists():
-            base += ["--config", str(config)]
-        return [*base, "--json", "--passWithNoTests", *files]
+            cmd += ["--config", str(config)]
+        # vitest expects test paths relative to the config root; the
+        # `run` subcommand accepts absolute or relative file args.
+        cmd.extend(files)
+        return cmd

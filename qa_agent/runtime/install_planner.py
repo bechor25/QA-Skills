@@ -30,6 +30,7 @@ _NODE_TEST_DEPS: dict[str, list[str]] = {
     "playwright-a11y": ["@axe-core/playwright"],
     "jest": ["jest", "@jest/globals", "supertest", "@types/supertest"],
     "jest-ts": ["ts-jest", "typescript", "@types/jest"],
+    "vitest": ["vitest", "supertest", "@types/supertest"],
 }
 
 _PY_TEST_DEPS: dict[str, list[str]] = {
@@ -55,8 +56,16 @@ def plan_installs(
             )
         )
 
-    if "playwright" in frameworks_used or "jest" in frameworks_used:
+    if {"playwright", "jest", "vitest"} & frameworks_used:
         node_mgr = _node_manager(pm)
+        if "vitest" in frameworks_used:
+            steps.append(
+                InstallStep(
+                    manager=node_mgr,
+                    args=_node_install_args(node_mgr, _NODE_TEST_DEPS["vitest"], dev=True),
+                    reason="vitest+supertest required by generated TS API tests",
+                )
+            )
         if "jest" in frameworks_used:
             steps.append(
                 InstallStep(

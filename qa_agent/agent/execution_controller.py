@@ -13,14 +13,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..executors.a11y_runner import A11yRunner
-from ..executors.base import Executor, ExecutionResult
+from ..executors.base import Executor, ExecutionResult, persist_per_test_logs
 from ..executors.gradle_runner import GradleRunner
 from ..executors.jest_runner import JestRunner
 from ..executors.maven_runner import MavenRunner
 from ..executors.playwright_runner import PlaywrightRunner
 from ..executors.pytest_runner import PytestRunner
 from ..executors.security_runner import SecurityRunner
+from ..executors.vitest_runner import VitestRunner
 from ..shared.logging import get_logger
+from ..shared.paths import run_dir
 from ..state import schemas
 from ..state.manager import StateManager
 
@@ -53,6 +55,12 @@ def execute_all(
         log.info("execute: %s/%s — %d files", framework, category, len(paths))
         result = executor.run(project_root, paths, timeout)
         results.append(result)
+        written = persist_per_test_logs(run_dir(str(project_root), run_id), result)
+        if written:
+            log.info(
+                "execute: persisted %d per-test logs for %s/%s",
+                written, framework, category,
+            )
         history.records.append(
             schemas.ExecutionRecord(
                 run_id=run_id,
@@ -88,6 +96,8 @@ def _pick_executor(framework: str, category: str) -> Executor | None:
         return PytestRunner()
     if framework == "jest":
         return JestRunner()
+    if framework == "vitest":
+        return VitestRunner()
     if framework == "playwright":
         return PlaywrightRunner()
     if framework == "maven":

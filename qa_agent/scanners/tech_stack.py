@@ -9,6 +9,7 @@ filename only (e.g. next.config.js) = 0.6.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from ..shared.logging import get_logger
@@ -174,8 +175,122 @@ def scan_tech_stack(project: str | Path | None, pm: schemas.ProjectMap) -> schem
                 )
             )
 
-    log.info("tech_stack: detected %d frameworks", len(detected))
-    return pm.model_copy(update={"frameworks": detected})
+    test_runners = _detect_test_runners(root, npm_deps, py_deps)
+    dev_servers = _detect_dev_servers(root)
+
+    log.info(
+        "tech_stack: detected %d frameworks, runners=%s, dev_servers=%s",
+        len(detected), test_runners, dev_servers,
+    )
+    return pm.model_copy(update={
+        "frameworks": detected,
+        "test_runners": test_runners,
+        "dev_servers": dev_servers,
+    })
+
+
+# ---------------------------------------------------------------------
+# Test runner detection
+# ---------------------------------------------------------------------
+
+# Markers that strongly imply a runner is the active TS test framework
+# for the workspace. Order = priority; first match wins.
+_TS_RUNNER_PRIORITY: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
+    # (runner_name, dep_markers, config_filenames)
+    ("vitest", ("vitest",), ("vitest.config.ts", "vitest.config.js", "vitest.config.mjs")),
+    ("jest", ("jest", "@jest/core"), ("jest.config.ts", "jest.config.js", "jest.config.mjs", "jest.config.cjs")),
+]
+
+_UI_RUNNER_PRIORITY: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
+    ("playwright", ("@playwright/test", "playwright"), ("playwright.config.ts", "playwright.config.js")),
+    ("cypress", ("cypress",), ("cypress.config.ts", "cypress.config.js")),
+]
+
+
+def _detect_test_runners(
+    root: Path,
+    npm_deps: dict[str, str],
+    py_deps: set[str],
+) -> dict[str, str]:
+    """Pick the runner the *target project* is actually using, by
+    priority over (dep present, config file present, just dep, none).
+
+    Returns a dict like ``{"api": "vitest", "ui": "playwright"}``. A
+    surface is omitted entirely when no runner is detected; downstream
+    code falls back to a sensible default (vitest for ts, pytest for
+    py) only when no signal at all is available.
+    """
+    out: dict[str, str] = {}
+
+    api = _pick_runner(root, npm_deps, _TS_RUNNER_PRIORITY)
+    if api:
+        out["api"] = api
+    elif npm_deps:
+        # Has npm deps but no jest/vitest signal → default to vitest:
+        # runs TS natively, no transform plugin needed.
+        out["api"] = "vitest"
+
+    ui = _pick_runner(root, npm_deps, _UI_RUNNER_PRIORITY)
+    if ui:
+        out["ui"] = ui
+
+    if "pytest" in py_deps or (root / "pytest.ini").exists() or (root / "conftest.py").exists():
+        out["py"] = "pytest"
+
+    return out
+
+
+def _pick_runner(
+    root: Path,
+    npm_deps: dict[str, str],
+    priority: list[tuple[str, tuple[str, ...], tuple[str, ...]]],
+) -> str | None:
+    best: tuple[int, str] | None = None
+    for name, dep_markers, config_files in priority:
+        has_dep = any(m in npm_deps for m in dep_markers)
+        has_config = any((root / cf).exists() for cf in config_files)
+        if has_dep and has_config:
+            score = 3
+        elif has_dep:
+            score = 2
+        elif has_config:
+            score = 1
+        else:
+            continue
+        if best is None or score > best[0]:
+            best = (score, name)
+    return best[1] if best else None
+
+
+# ---------------------------------------------------------------------
+# Dev-server URL detection (used by harness to wire UI test baseURL)
+# ---------------------------------------------------------------------
+
+_VITE_PORT_RE = re.compile(r"server\s*:\s*\{[^}]*?\bport\s*:\s*(\d{2,5})", re.DOTALL)
+_NEXT_PORT_RE = re.compile(r"NEXT_PUBLIC_PORT\s*=\s*[\"']?(\d{2,5})")
+
+
+def _detect_dev_servers(root: Path) -> dict[str, str]:
+    """Inspect framework config files for a declared dev-server port.
+
+    Generic: only checks shape (`server: { port: N }` in vite,
+    NEXT_PUBLIC_PORT in next env). Falls back to no entry when nothing
+    is declared; the harness generator then picks safe defaults from
+    its own list (5173 for vite, 3000 for next) — those defaults are
+    framework constants, not project-specific.
+    """
+    out: dict[str, str] = {}
+    for candidate in ("vite.config.ts", "vite.config.js", "vite.config.mjs"):
+        for vc in (root / candidate, *root.glob(f"*/{candidate}"), *root.glob(f"apps/*/{candidate}"), *root.glob(f"packages/*/{candidate}")):
+            try:
+                text = vc.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            m = _VITE_PORT_RE.search(text)
+            if m:
+                out["ui"] = f"http://localhost:{m.group(1)}"
+                return out
+    return out
 
 
 def _read_npm_deps(root: Path) -> dict[str, str]:

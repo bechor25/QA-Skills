@@ -18,7 +18,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ...generators import scaffolds
+from ...generators import harness, scaffolds
 from ...generators.base import write_file
 from ...shared.logging import get_logger
 from ...shared.paths import project_root
@@ -35,20 +35,28 @@ def run(args: argparse.Namespace) -> int:
 
     pm = sm.project_map()
     target_language = _target_language(pm)
+    api_runner = pm.test_runners.get("api")
     plan = sm.load(schemas.TestDataPlan)
     hints = scaffolds.ScaffoldHints.from_plan(plan)
+
+    log.info(
+        "scaffold: language=%s api_runner=%s ui_runner=%s",
+        target_language,
+        api_runner or "(default)",
+        pm.test_runners.get("ui") or "(none)",
+    )
 
     shards = sm.list_scenario_capabilities()
     if shards:
         log.info("scaffold: using sharded scenarios for %d capabilities", len(shards))
-        entries, files_written = _scaffold_from_shards(sm, root, shards, target_language, hints)
+        entries, files_written = _scaffold_from_shards(sm, root, shards, target_language, api_runner, hints)
     else:
         legacy = sm.load(schemas.Scenarios)
         log.info(
             "scaffold: no shards found, falling back to legacy scenarios.json (%d entries)",
             len(legacy.entries),
         )
-        entries, files_written = _scaffold_from_legacy(root, legacy, target_language, hints)
+        entries, files_written = _scaffold_from_legacy(root, legacy, target_language, api_runner, hints)
 
     generated = schemas.GeneratedTests(built_at=datetime.now(timezone.utc), entries=entries)
     sm.save(generated)
@@ -57,6 +65,12 @@ def run(args: argparse.Namespace) -> int:
         files_written,
         len(entries),
     )
+
+    emitted_paths = [e.path for e in entries]
+    harness_files = harness.emit_harness_files(root, pm, emitted_paths)
+    if harness_files:
+        log.info("scaffold: harness files emitted: %s", harness_files)
+
     log.info("scaffold: READY. Next: fan out qa-body-author per (capability, category) file.")
     return 0
 
@@ -76,6 +90,7 @@ def _scaffold_from_shards(
     root: Path,
     shards: list[str],
     target_language: str,
+    api_runner: str | None,
     hints: scaffolds.ScaffoldHints,
 ) -> tuple[list[schemas.GeneratedTest], int]:
     grouped: dict[tuple[str, str], list[schemas.RichScenario]] = defaultdict(list)
@@ -86,25 +101,27 @@ def _scaffold_from_shards(
         for sc in sh.scenarios:
             grouped[(sc.capability, sc.category)].append(sc)
 
-    return _emit_groups(root, grouped, target_language, hints)
+    return _emit_groups(root, grouped, target_language, api_runner, hints)
 
 
 def _scaffold_from_legacy(
     root: Path,
     legacy: schemas.Scenarios,
     target_language: str,
+    api_runner: str | None,
     hints: scaffolds.ScaffoldHints,
 ) -> tuple[list[schemas.GeneratedTest], int]:
     grouped: dict[tuple[str, str], list[schemas.Scenario]] = defaultdict(list)
     for sc in legacy.entries:
         grouped[(sc.capability, sc.category)].append(sc)
-    return _emit_groups(root, grouped, target_language, hints, feature_id_fn=lambda sc: sc.feature_id)
+    return _emit_groups(root, grouped, target_language, api_runner, hints, feature_id_fn=lambda sc: sc.feature_id)
 
 
 def _emit_groups(
     root: Path,
     grouped: dict[tuple[str, str], list],
     target_language: str,
+    api_runner: str | None,
     hints: scaffolds.ScaffoldHints,
     feature_id_fn=None,
 ) -> tuple[list[schemas.GeneratedTest], int]:
@@ -120,6 +137,7 @@ def _emit_groups(
             category=category,
             scenarios=stubs,
             language=target_language,
+            runner=api_runner,
             hints=hints,
         )
         write_file(root, gf)

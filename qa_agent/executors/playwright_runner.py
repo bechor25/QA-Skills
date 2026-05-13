@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 from ..runtime.process_manager import run_subprocess
-from .base import Executor, ExecutionResult
+from .base import Executor, ExecutionResult, PerTestRecord, extract_scenario_id
 
 
 class PlaywrightRunner(Executor):
@@ -23,11 +23,12 @@ class PlaywrightRunner(Executor):
         if not test_files:
             return ExecutionResult(framework=self.framework, category=self.category)
         cmd = self._command(project_root, test_files)
-        # Playwright's JSON reporter prints to stdout when configured.
         env = {"PLAYWRIGHT_JSON_OUTPUT_NAME": "playwright-report.json"}
         proc = run_subprocess(cmd, cwd=project_root, timeout=timeout, env=env)
         report_file = project_root / "playwright-report.json"
-        passed, failed, skipped = _parse_playwright(report_file, proc.stdout_tail)
+        passed, failed, skipped, records = _parse_playwright(report_file, proc.stdout_tail, project_root)
+        if proc.exit_code not in (0, None) and (passed + failed + skipped) == 0:
+            failed = len(test_files)
         return ExecutionResult(
             framework=self.framework,
             category=self.category,
@@ -38,15 +39,25 @@ class PlaywrightRunner(Executor):
             duration_seconds=proc.duration_seconds,
             exit_code=proc.exit_code,
             process=proc,
+            per_test_records=records,
         )
 
     def _command(self, project_root: Path, files: list[str]) -> list[str]:
         local = project_root / "node_modules" / ".bin" / "playwright"
         base = [str(local)] if local.exists() else ["npx", "--yes", "playwright"]
-        return [*base, "test", "--reporter=json,line", *files]
+        config = project_root / "tests" / "qa-agent" / "playwright.config.ts"
+        cmd = [*base, "test", "--reporter=json"]
+        if config.exists():
+            cmd += ["--config", str(config)]
+        cmd.extend(files)
+        return cmd
 
 
-def _parse_playwright(report_path: Path, stdout: str) -> tuple[int, int, int]:
+def _parse_playwright(
+    report_path: Path,
+    stdout: str,
+    project_root: Path,
+) -> tuple[int, int, int, list[PerTestRecord]]:
     text = ""
     if report_path.exists():
         try:
@@ -57,10 +68,69 @@ def _parse_playwright(report_path: Path, stdout: str) -> tuple[int, int, int]:
         text = stdout
     start = text.find("{")
     if start == -1:
-        return 0, 0, 0
+        return 0, 0, 0, []
     try:
         data = json.loads(text[start:])
     except json.JSONDecodeError:
-        return 0, 0, 0
+        return 0, 0, 0, []
+
     stats = data.get("stats") or {}
-    return int(stats.get("expected", 0)), int(stats.get("unexpected", 0)), int(stats.get("skipped", 0))
+    passed = int(stats.get("expected", 0))
+    failed = int(stats.get("unexpected", 0))
+    skipped = int(stats.get("skipped", 0))
+
+    records: list[PerTestRecord] = []
+    for suite in data.get("suites", []) or []:
+        records.extend(_walk_pw_suite(suite, suite.get("file", ""), project_root))
+    return passed, failed, skipped, records
+
+
+def _walk_pw_suite(suite: dict, file_path: str, project_root: Path) -> list[PerTestRecord]:
+    out: list[PerTestRecord] = []
+    file_path = suite.get("file", file_path)
+    for spec in suite.get("specs", []) or []:
+        title = spec.get("title", "")
+        spec_file = spec.get("file", file_path)
+        for test in spec.get("tests", []) or []:
+            for result in test.get("results", []) or []:
+                status = (result.get("status") or "").lower()
+                duration = float(result.get("duration") or 0.0)
+                err = result.get("error") or {}
+                err_msg = err.get("message") if isinstance(err, dict) else ""
+                err_stack = err.get("stack") if isinstance(err, dict) else ""
+                scenario_id = extract_scenario_id(title)
+                rel_file = _rel(spec_file, project_root)
+                test_id = scenario_id or f"{rel_file}::{title}"
+                out.append(
+                    PerTestRecord(
+                        test_id=test_id,
+                        file=rel_file,
+                        title=title,
+                        status=_normalize_pw_status(status),
+                        duration_ms=duration,
+                        error_message=err_msg or "",
+                        error_stack=err_stack or "",
+                    )
+                )
+    for child in suite.get("suites", []) or []:
+        out.extend(_walk_pw_suite(child, file_path, project_root))
+    return out
+
+
+def _normalize_pw_status(s: str) -> str:
+    return {
+        "passed": "passed",
+        "failed": "failed",
+        "timedout": "failed",
+        "interrupted": "failed",
+        "skipped": "skipped",
+    }.get(s, s or "other")
+
+
+def _rel(path: str, project_root: Path) -> str:
+    if not path:
+        return ""
+    try:
+        return str(Path(path).resolve().relative_to(project_root.resolve()))
+    except (ValueError, OSError):
+        return path

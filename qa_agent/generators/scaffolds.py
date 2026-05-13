@@ -57,22 +57,31 @@ def emit_scaffold_group(
     category: str,
     scenarios: Sequence[ScenarioStub],
     language: str,
-    framework_hint: str | None = None,
+    runner: str | None = None,
     hints: ScaffoldHints | None = None,
 ) -> GeneratedFile:
     """Return a single scaffold file holding stubs for every scenario
     in `(capability, category)`.
+
+    ``runner`` picks which TS test runner the body should target —
+    ``"vitest"`` (default for TS) or ``"jest"``. Python paths always
+    use pytest. UI / accessibility always use Playwright regardless
+    of ``runner``.
     """
     if not scenarios:
         raise ValueError("emit_scaffold_group: scenarios must be non-empty")
     hints = hints or ScaffoldHints()
+    resolved_runner = _resolve_runner(language, category, runner)
 
-    builder = _GROUP_BUILDERS.get((category, language))
+    builder = _GROUP_BUILDERS.get((category, language, resolved_runner))
     if builder is None:
-        # Fall back by category, defaulting to api shape if exotic.
-        builder = _GROUP_BUILDERS.get((category, "typescript")) or _api_jest_group
-        if language == "python":
-            builder = _GROUP_BUILDERS.get(("api", "python"), _api_pytest_group)
+        # Fall back: same category+lang, default runner. Then
+        # universal api fallback (jest for ts, pytest for py).
+        builder = (
+            _GROUP_BUILDERS.get((category, language, _default_runner(language, category)))
+            or _GROUP_BUILDERS.get(("api", language, _default_runner(language, "api")))
+            or _api_vitest_group
+        )
     return builder(capability, scenarios, hints)
 
 
@@ -82,7 +91,7 @@ def emit_scaffold(
     category: str,
     title: str,
     language: str,
-    framework_hint: str | None = None,
+    runner: str | None = None,
     hints: ScaffoldHints | None = None,
 ) -> GeneratedFile:
     """Back-compat single-scenario wrapper. Produces a grouped file
@@ -94,9 +103,31 @@ def emit_scaffold(
         category=category,
         scenarios=[ScenarioStub(id=scenario_id, title=title)],
         language=language,
-        framework_hint=framework_hint,
+        runner=runner,
         hints=hints,
     )
+
+
+def _resolve_runner(language: str, category: str, hint: str | None) -> str:
+    if category in ("ui", "accessibility"):
+        # Browser-driven categories always use playwright. The ``hint``
+        # only governs the TS API-side runner.
+        return "playwright"
+    if language == "python":
+        return "pytest"
+    if hint in ("vitest", "jest"):
+        return hint
+    return _default_runner(language, category)
+
+
+def _default_runner(language: str, category: str) -> str:
+    if language == "python":
+        return "pytest"
+    if category in ("ui", "accessibility"):
+        return "playwright"
+    # TS API/security/performance — vitest is the modern default
+    # (runs TS natively, no transform plugin needed).
+    return "vitest"
 
 
 # ---------------------------------------------------------------------
@@ -180,22 +211,50 @@ def _pytest_functions(
 # API
 # ---------------------------------------------------------------------
 
-def _api_jest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
-    rel = f"tests/qa-agent/api/{capability}.spec.ts"
+def _api_ts_group(
+    capability: str,
+    scenarios: Sequence[ScenarioStub],
+    hints: ScaffoldHints,
+    runner: str,
+    section_label: str,
+) -> GeneratedFile:
+    """Shared TS builder for api / security / performance. The only
+    difference between jest and vitest output is the import source
+    and the framework name we tag on the GeneratedFile.
+    """
+    rel = f"tests/qa-agent/{section_label}/{capability}.spec.ts"
     fx_import, fx_setup, fx_teardown = _ts_fixture_block(hints)
+    test_import = _ts_test_import(runner)
     body = (
-        f'{_ts_header(capability, "api")}'
+        f'{_ts_header(capability, section_label)}'
         f'import request from "supertest";\n'
-        f'import {{ describe, it, expect, beforeEach, afterEach }} from "@jest/globals";\n'
-        f'import app from "../../../qa-agent.app";\n'
+        f'{test_import}\n'
+        f'import app from "../qa-agent.app";\n'
         f'{fx_import}\n'
-        f'describe("{capability} — api", () => {{\n'
+        f'describe("{capability} — {section_label}", () => {{\n'
         f'  beforeEach(async () => {{\n{fx_setup}  }});\n'
         f'  afterEach(async () => {{\n{fx_teardown}  }});\n\n'
         f'{_todo_lines(scenarios)}\n'
         f'}});\n'
     )
-    return GeneratedFile(rel_path=rel, body=body, framework="jest", language="typescript")
+    return GeneratedFile(rel_path=rel, body=body, framework=runner, language="typescript")
+
+
+def _ts_test_import(runner: str) -> str:
+    """Return the import line that exposes describe/it/expect for
+    the chosen TS runner. vitest's API is jest-compatible at our
+    usage level; only the source module changes.
+    """
+    source = "vitest" if runner == "vitest" else "@jest/globals"
+    return f'import {{ describe, it, expect, beforeEach, afterEach }} from "{source}";'
+
+
+def _api_jest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
+    return _api_ts_group(capability, scenarios, hints, runner="jest", section_label="api")
+
+
+def _api_vitest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
+    return _api_ts_group(capability, scenarios, hints, runner="vitest", section_label="api")
 
 
 def _api_pytest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
@@ -252,21 +311,11 @@ def _ui_pytest_playwright_group(capability: str, scenarios: Sequence[ScenarioStu
 # ---------------------------------------------------------------------
 
 def _security_jest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
-    rel = f"tests/qa-agent/security/{capability}.spec.ts"
-    fx_import, fx_setup, fx_teardown = _ts_fixture_block(hints)
-    body = (
-        f'{_ts_header(capability, "security")}'
-        f'import request from "supertest";\n'
-        f'import {{ describe, it, expect, beforeEach, afterEach }} from "@jest/globals";\n'
-        f'import app from "../../../qa-agent.app";\n'
-        f'{fx_import}\n'
-        f'describe("{capability} — security", () => {{\n'
-        f'  beforeEach(async () => {{\n{fx_setup}  }});\n'
-        f'  afterEach(async () => {{\n{fx_teardown}  }});\n\n'
-        f'{_todo_lines(scenarios)}\n'
-        f'}});\n'
-    )
-    return GeneratedFile(rel_path=rel, body=body, framework="jest", language="typescript")
+    return _api_ts_group(capability, scenarios, hints, runner="jest", section_label="security")
+
+
+def _security_vitest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
+    return _api_ts_group(capability, scenarios, hints, runner="vitest", section_label="security")
 
 
 def _security_pytest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
@@ -301,18 +350,27 @@ def _a11y_playwright_ts_group(capability: str, scenarios: Sequence[ScenarioStub]
 # Performance
 # ---------------------------------------------------------------------
 
-def _perf_jest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
+def _perf_ts_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints, runner: str) -> GeneratedFile:
     rel = f"tests/qa-agent/performance/{capability}.spec.ts"
+    source = "vitest" if runner == "vitest" else "@jest/globals"
     body = (
         f'{_ts_header(capability, "performance")}'
         f'import request from "supertest";\n'
-        f'import {{ describe, it, expect }} from "@jest/globals";\n'
-        f'import app from "../../../qa-agent.app";\n\n'
+        f'import {{ describe, it, expect }} from "{source}";\n'
+        f'import app from "../qa-agent.app";\n\n'
         f'describe("{capability} — performance", () => {{\n'
         f'{_todo_lines(scenarios)}\n'
         f'}});\n'
     )
-    return GeneratedFile(rel_path=rel, body=body, framework="jest", language="typescript")
+    return GeneratedFile(rel_path=rel, body=body, framework=runner, language="typescript")
+
+
+def _perf_jest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
+    return _perf_ts_group(capability, scenarios, hints, runner="jest")
+
+
+def _perf_vitest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
+    return _perf_ts_group(capability, scenarios, hints, runner="vitest")
 
 
 def _perf_pytest_group(capability: str, scenarios: Sequence[ScenarioStub], hints: ScaffoldHints) -> GeneratedFile:
@@ -326,20 +384,30 @@ def _perf_pytest_group(capability: str, scenarios: Sequence[ScenarioStub], hints
 
 
 # ---------------------------------------------------------------------
-# Dispatch table — (category, language) → builder.
+# Dispatch table — (category, language, runner) → builder.
 # Accessibility intentionally Playwright-only; pytest fallback rolls
 # into the ui category instead.
 # ---------------------------------------------------------------------
 
 _GROUP_BUILDERS = {
-    ("api", "typescript"): _api_jest_group,
-    ("api", "python"): _api_pytest_group,
-    ("ui", "typescript"): _ui_playwright_ts_group,
-    ("ui", "python"): _ui_pytest_playwright_group,
-    ("security", "typescript"): _security_jest_group,
-    ("security", "python"): _security_pytest_group,
-    ("accessibility", "typescript"): _a11y_playwright_ts_group,
-    ("accessibility", "python"): _a11y_playwright_ts_group,
-    ("performance", "typescript"): _perf_jest_group,
-    ("performance", "python"): _perf_pytest_group,
+    # API
+    ("api", "typescript", "vitest"): _api_vitest_group,
+    ("api", "typescript", "jest"): _api_jest_group,
+    ("api", "python", "pytest"): _api_pytest_group,
+    # UI — Playwright is the only runner
+    ("ui", "typescript", "playwright"): _ui_playwright_ts_group,
+    ("ui", "python", "pytest"): _ui_pytest_playwright_group,
+    ("ui", "python", "playwright"): _ui_pytest_playwright_group,
+    # Security mirrors API
+    ("security", "typescript", "vitest"): _security_vitest_group,
+    ("security", "typescript", "jest"): _security_jest_group,
+    ("security", "python", "pytest"): _security_pytest_group,
+    # Accessibility — Playwright + axe only
+    ("accessibility", "typescript", "playwright"): _a11y_playwright_ts_group,
+    ("accessibility", "python", "playwright"): _a11y_playwright_ts_group,
+    ("accessibility", "python", "pytest"): _a11y_playwright_ts_group,
+    # Performance mirrors API
+    ("performance", "typescript", "vitest"): _perf_vitest_group,
+    ("performance", "typescript", "jest"): _perf_jest_group,
+    ("performance", "python", "pytest"): _perf_pytest_group,
 }

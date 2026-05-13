@@ -38,6 +38,14 @@ class ProjectMap(BaseModel):
     files: list[FileEntry] = Field(default_factory=list)
     frameworks: list[FrameworkEntry] = Field(default_factory=list)
     package_managers: list[str] = Field(default_factory=list)
+    # test_runners: which runner to use per surface — derived from
+    # detected deps + config files (vitest > jest, playwright for UI).
+    # Keys: "api" (backend tests), "ui" (browser tests), "py" (python).
+    test_runners: dict[str, str] = Field(default_factory=dict)
+    # dev_servers: detected dev-time ports/hostnames, used to wire
+    # generated harness configs (e.g. playwright baseURL). Keys: "ui",
+    # "api". Values: full URL like "http://localhost:5173".
+    dev_servers: dict[str, str] = Field(default_factory=dict)
 
 
 # ----------------------------------------------------------------------

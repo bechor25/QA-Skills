@@ -15,18 +15,53 @@ flaky, or infrastructure was broken — and to back that with evidence.
 
 - `test_id` — scenario id, e.g. `sc::auth::api::01`.
 - `test_path` — relative path to the test file.
-- `log_path` — relative path to the run log for this test.
+- `log_path` — relative path to the per-test log for this failure
+  (see "Where the log lives" below).
 - `project_root`.
 
 Optional hints: handler path, contract path. If missing, derive them
 from the scenario in `state/scenarios/<capability>.json` and
 `state/contracts/<capability>.json`.
 
+## Where the log lives
+
+After Fix I, the runner persists one log per failing test at:
+
+```
+<project_root>/.qa-agent/runs/<run_id>/logs/<safe_test_id>.log
+```
+
+The orchestrator passes you the exact path. The file is plain text
+with this shape:
+
+```
+test_id: sc::auth::api::01
+file: tests/qa-agent/api/auth.spec.ts
+title: POST /api/auth/login with valid credentials returns 200
+status: failed
+duration_ms: 124
+
+=== error message ===
+expect(received).toBe(expected): Expected: 200, Received: 401
+
+=== stack trace ===
+at Object.<anonymous> (.../auth.spec.ts:42:18)
+...
+```
+
+Read this file **first**. It is your ground truth. Only after reading
+it do you read the test file or handler.
+
+The same directory holds a combined log per runner at
+``logs/_<framework>-<category>.log`` with the raw stdout/stderr tail —
+use it only when the per-test file is missing or empty (rare; means
+the runner crashed before any test reported).
+
 ## What to read
 
-1. The test file at `test_path` — full file.
-2. The log at `log_path` — full file. This is the ground truth for the
-   failure mode (stack trace, response body, timing).
+1. **The per-test log** at `log_path` — full file. Status, error
+   message, stack.
+2. The test file at `test_path` — full file.
 3. The contract for the capability — what was expected.
 4. The handler file referenced in the contract's
    `endpoints[*].module_path` — **only the function that handles this
