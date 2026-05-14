@@ -696,3 +696,261 @@ J+L+K+M אינם תלויים אחד בשני. ניתן לבצע בכל סדר. 
 4. **No DOM assumptions.** body-author לא מניח על מבנה DOM של target — סומך על ui_selectors.json שמופק מקוד.
 5. **Triage קורא log קודם.** הוראה מפורשת ב-qa-triage.md לא לערוך קוד לפני קריאת ה-per-test log.
 
+---
+
+# WORKPLAN v4 — Probe-first gating (Fixes N / O / R / S / T / U)
+
+נוצר: 2026-05-13
+טריגר: ריצה מלאה עם G-M → 4.7% pass rate. הסיבה: ה-pipeline בנה 332 טסטים מבוססי-contract לפני בדיקה אחת שמאמתת שה-contract תואם את ה-runtime האמיתי. ה-Candidate_Mngmnt משתמש ב-passwordless login (email בלבד), אבל ה-enricher דדוס password מ-code reading → 332 טסטים כתבו בקשות עם `password` שלא קיים.
+
+## שינוי קונספטואלי
+
+ה-flow הקיים: SCAN → ENRICH (ALL caps) → SCENARIOS (ALL) → BODIES (ALL) → RUN → 5% pass → "תתחיל מחדש".
+
+ה-flow החדש: SCAN → ENRICH 1 cap → 5 SCENARIOS → 5 BODIES → RUN → **ANALYZE + ASK USER** → adjust → re-probe → ≥80% pass → **המשך flow רגיל** עם contracts מתוקנים.
+
+**עיקרון**: ה-probe הוא **gate לפני scaling**, לא תחליף. אחרי הצלחתו, ה-flow הקיים (Phases 4-10) רץ כפי שהיה, רק עם contracts מאומתים → ~70%+ pass rate על fan-out המלא.
+
+## איפה זה משתלב
+
+| Phase מקורי | תוכן | אחרי שינוי |
+|---|---|---|
+| 1-2 scan + analyze | CLI | ללא שינוי |
+| 3a-3c cluster + mapper + strategy | CLI + Agent | ללא שינוי |
+| **3.5 PROBE** | **חדש** | **gate**: probe על cap קנוני אחד (`auth` או הסיכון הגבוה ביותר) |
+| 4 enrich (ALL caps) | Agent fan-out | רץ **רק אחרי** ש-probe עבר. מקבל user_overrides מ-probe phase. |
+| 5 scenarios (ALL) | Agent fan-out | מקבל hints מ-probe (auth scheme, seed assumptions) |
+| 6 scaffold | CLI | ללא שינוי |
+| 7 bodies (ALL) | Agent fan-out | ללא שינוי |
+| 8 run | CLI | ללא שינוי |
+| 9 triage | Agent | ללא שינוי |
+| 10 report | CLI | מוסיף section "user overrides applied" |
+
+ה-flow הרגיל ממשיך אחרי probe. ה-probe **לא מחליף** את phase 4+. הוא **מבטיח שהן תפעלנה** עם נתונים נכונים.
+
+---
+
+## Phase 3.5 — Probe Loop (מפורט)
+
+### 3.5.a — Pick probe target
+
+קח את ה-capability הראשון מ-`capability_map.json` שעונה על:
+1. canonical (`auth`, `users`, `permissions`) — עדיפות ראשונה.
+2. אם אין — top by `score_hint`.
+
+מטרה: **cap אחד**, לא יותר. probe חייב להיות זול ומהיר.
+
+### 3.5.b — Probe enrich
+
+dispatch של **`qa-enricher`** רגיל אבל עם `probe_mode=true`. השינוי היחיד: הסוכן יודע ש-contract זה הולך להיבחן ב-runtime לפני שמשתמשים בו לסקייל.
+
+### 3.5.c — Probe scenarios
+
+dispatch של **`qa-scenario-author`** עם `probe_mode=true` + `max_scenarios=1_per_category`. תוצאה: 3-5 scenarios (api, security, ui, performance, accessibility — תלוי במה strategy מציע).
+
+### 3.5.d — Probe bodies
+
+dispatch של **`qa-body-author`** רגיל על ה-5.
+
+### 3.5.e — Probe run (CLI)
+
+`qa-skills-run run-tests --probe-only` — flag חדש שמסנן `generated_tests.entries` לאלה שתויגו `probe=true`. רץ קצר (~30 שניות).
+
+### 3.5.f — Probe analyze (Agent חדש)
+
+`qa-probe-analyzer` (sub-agent) קורא:
+- 5 per-test logs
+- 5 scenarios שנכשלו
+- ה-contract של auth
+- knowledge_graph.json (לזיהוי ה-stack)
+
+מזהה patterns:
+
+| Pattern | משמעות | שאלה למשתמש |
+|---|---|---|
+| `400` + `<field>: Required` ב-log | ה-handler דורש שדה שה-contract לא רושם | "ה-handler דורש `X`. האם להוסיף ל-contract?" |
+| `400` + field that contract sent | ה-handler לא מקבל שדה שה-contract רושם | "האם השדה `X` קיים בflow שלך? (לדוגמה passwordless)" |
+| `401` כל ה-tests + auth contract לא משתמש ב-cookie | flow auth שונה | "איך login מחזיר session? cookie? bearer? JWT in body?" |
+| `process.exit` | env חסר | "set DATABASE_URL, JWT_SECRET..." |
+| `ECONNREFUSED <baseURL>` | dev server לא רץ | "הפעל את ה-app: `npm run dev`" |
+| `404` על endpoint שה-contract מכיל | mount path שונה | "ה-route mounted ב-`/api/auth` או ב-`/v1/auth`?" |
+| All passed (≥80%) | OK to scale | (אין שאלות) |
+
+יוצר קובץ `state/probe_findings.json`:
+```json
+{
+  "iteration": 1,
+  "passed": 1,
+  "failed": 4,
+  "patterns": [
+    {
+      "kind": "schema-drift",
+      "evidence": "POST /auth/login returned 400: password not accepted",
+      "questions": [
+        {
+          "id": "auth_password_required",
+          "question_he": "ה-API שלך מקבל login עם email בלבד, או דורש סיסמה?",
+          "options": ["email only (passwordless)", "email + password", "email + OTP"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### 3.5.g — User clarification
+
+ה-skill (אתה, ב-top-level Claude session) קורא את `probe_findings.json`, מציג את השאלות **בעברית** ל-user via `AskUserQuestion`. user עונה → התשובות נשמרות ל-`state/user_overrides.json`:
+
+```json
+{
+  "auth": {
+    "login_request_body": {"required": ["email"], "removed": ["password"]},
+    "session_carrier": "httpOnly cookie",
+    "test_user_credentials": {"email": "admin@test.com"}
+  },
+  "seed_strategy": "user-provided fixtures",
+  "env_required": ["DATABASE_URL", "JWT_SECRET"]
+}
+```
+
+### 3.5.h — Apply overrides + re-probe
+
+CLI: `qa-skills-run apply-overrides --project ...` — קורא `user_overrides.json` ומעדכן את `contracts/auth.json` בהתאם (אסור project-specific logic — רק apply של overrides גנריים).
+
+ואז: חזור ל-3.5.b עד 3.5.f. iteration counter עולה.
+
+**Max iterations: 3.** אחרי 3 כשלים → הצג למשתמש "לא הצלחתי לאמת. רוצים לדלג ל-fan-out מלא בכל זאת?"
+
+### 3.5.i — Gate
+
+אם probe pass ≥ 80% → המשך ל-**phase 4 רגיל** (fan-out enrich על כל ה-caps). ה-overrides שנאספו מועברים ל-enricher כ-input → contracts של כל ה-caps נכתבים עם הידע שכבר נצבר.
+
+אם probe pass < 80% אחרי 3 iterations → user מקבל choice: dump overrides ולהמשיך בכל זאת, או להפסיק.
+
+---
+
+## רשימת קבצים שמשתנים / מתווספים
+
+### Fix N — JSON ל-file במקום stdout (פותר api buffer truncation)
+
+| קובץ | פעולה |
+|---|---|
+| [qa_agent/executors/vitest_runner.py](qa_agent/executors/vitest_runner.py) | `--outputFile=<tmp>` במקום parse stdout. קורא JSON מהקובץ. |
+| [qa_agent/executors/jest_runner.py](qa_agent/executors/jest_runner.py) | אותו דבר (`--json --outputFile=<tmp>`). |
+| [qa_agent/executors/ts_reporter.py](qa_agent/executors/ts_reporter.py) | helper חדש `parse_jest_style_json_from_file(path)`. |
+
+### Fix O — VitestRunner category נכון
+
+| קובץ | פעולה |
+|---|---|
+| [qa_agent/executors/vitest_runner.py](qa_agent/executors/vitest_runner.py) | `run()` מקבל `category` מ-`execute_all`, מחזיר ב-result. |
+| [qa_agent/agent/execution_controller.py](qa_agent/agent/execution_controller.py) | מעביר category בקריאה. |
+
+### Fix R — Probe phase orchestration
+
+| קובץ | פעולה |
+|---|---|
+| **חדש**: [qa_agent/state/schemas.py](qa_agent/state/schemas.py) | `ProbeFindings`, `UserOverrides` |
+| **חדש**: [qa_agent/cli/commands/probe.py](qa_agent/cli/commands/probe.py) | `probe-select` (פיק cap), `apply-overrides` (CLI) |
+| [qa_agent/cli/__main__.py](qa_agent/cli/__main__.py) | sub-command `probe-select` + `apply-overrides` |
+| [qa_agent/cli/commands/run_tests.py](qa_agent/cli/commands/run_tests.py) | `--probe-only` flag — filter tests by `probe=true` tag |
+| [qa_agent/state/schemas.py](qa_agent/state/schemas.py) | `GeneratedTest.probe: bool = False` |
+| [skills/test-orchestrator/SKILL.md](skills/test-orchestrator/SKILL.md) | Phase 3.5 חדש + user-clarification loop |
+
+### Fix S — qa-probe-analyzer agent חדש
+
+| קובץ | פעולה |
+|---|---|
+| **חדש**: [agents/qa-probe-analyzer.md](agents/qa-probe-analyzer.md) | קורא probe logs, מזהה patterns, מנסח שאלות בעברית |
+| [qa_agent/state/schemas.py](qa_agent/state/schemas.py) | `ProbeFindings` schema (pattern, questions, evidence) |
+
+### Fix T — qa-enricher עם user_overrides
+
+| קובץ | פעולה |
+|---|---|
+| [agents/qa-enricher.md](agents/qa-enricher.md) | קלט נוסף `user_overrides_path`. הסוכן קורא, מתאים contract לפי overrides. |
+| [qa_agent/state/schemas.py](qa_agent/state/schemas.py) | `UserOverrides` schema |
+
+### Fix U — qa-scenario-author עם probe_mode
+
+| קובץ | פעולה |
+|---|---|
+| [agents/qa-scenario-author.md](agents/qa-scenario-author.md) | `probe_mode=true` ⇒ 1 scenario לכל category, מסומן `probe=true` |
+| [qa_agent/state/schemas.py](qa_agent/state/schemas.py) | `RichScenario.probe: bool = False` |
+
+### Fix R (המשך) — body-author + report
+
+| קובץ | פעולה |
+|---|---|
+| [agents/qa-body-author.md](agents/qa-body-author.md) | accept user_overrides hints (e.g. "auth uses email only — don't send password") |
+| [reports/enterprise.html.j2](reports/enterprise.html.j2) | section חדש "User overrides applied" + "Probe iterations" |
+
+---
+
+## עקרונות מחייבים (חזרה מורחבת)
+
+1. **אפס project-specific**: ה-`user_overrides.json` הוא היחיד שיכול להכיל פרטי project. כל שאר ה-code/prompt חייב להישאר generic.
+2. **שאלות בעברית, code באנגלית**: ה-probe-analyzer מנסח שאלות ב-Hebrew (`question_he`). overrides נשמרים באנגלית.
+3. **Max 3 iterations**: probe לא בלולאה אינסופית. user יכול לעקוף.
+4. **Idempotent overrides**: apply-overrides לא דורס חוזר; הוא mergeי.
+5. **Probe ניתן לדילוג**: דגל `--skip-probe` ל-CLI / instruction בskill למקרי edge.
+
+---
+
+## Acceptance v4
+
+| # | בדיקה | יעד |
+|---|---|---|
+| 1 | `qa-skills-run probe-select` בוחר cap קנוני | ✓ |
+| 2 | probe run מייצר ~5 tests, רץ ~30 שניות | ✓ |
+| 3 | probe-analyzer מזהה ≥1 pattern + מנסח שאלה בעברית | ✓ על Candidate_Mngmnt (passwordless detected) |
+| 4 | user clarification → user_overrides.json נכתב | ✓ |
+| 5 | apply-overrides → contracts/auth.json מעודכן עם email-only | ✓ |
+| 6 | re-probe pass ≥80% | ✓ אחרי 1-2 iterations |
+| 7 | fan-out מלא רץ עם overrides → bodies לא כוללים `password` | ✓ |
+| 8 | run-tests on full → pass rate **>50%** (vs 4.7% היום) | ✓ |
+| 9 | report HTML מציג iterations + overrides | ✓ |
+| 10 | קבצי harness לא נוגעים ל-data מ-Candidate_Mngmnt | ✓ |
+
+---
+
+## עלות-תועלת
+
+### היום
+- 332 tests blind generation: $5-10
+- 5% pass rate
+- discovery של schema mismatch: רק אחרי 30 דק' ריצה
+- "rerun" עולה $5+ נוסף
+
+### אחרי v4
+- probe iteration 1: $0.30
+- user clarification: 30 שניות
+- apply-overrides: $0.05 (CLI)
+- probe iteration 2-3 (אם צריך): $0.30 each
+- full pipeline (פעם אחת, מאומת): $5
+- **total: $5.95, pass rate >50%, אין wasted work**
+
+חיסכון: 30-50% tokens. ROI עיקרי = **TRUST**: בdiscovery מוקדם של mismatches → לא scaling של bugs.
+
+---
+
+## סדר ביצוע (v4)
+
+| Step | Fix | תלות |
+|---|---|---|
+| 1 | N (JSON to file) | אין — קל וברור |
+| 2 | O (VitestRunner category) | אין |
+| 3 | T (qa-enricher user_overrides input) | אין |
+| 4 | U (qa-scenario-author probe_mode) | T |
+| 5 | S (qa-probe-analyzer agent) | T+U |
+| 6 | R (probe orchestration in SKILL.md + CLI commands) | N+O+S+T+U |
+
+**מסלול קריטי**: N+O ראשונים (תשתית), אז T+U+S (agents), אז R (orchestration).
+
+---
+
+## שאלה פתוחה למשתמש
+
+האם להוסיף **dry-run mode** ב-CLI שיציג את ה-questions שיישאלו (mockי) ללא ריצה אמיתית? יעזור ל-testing של ה-probe-analyzer.
+

@@ -22,6 +22,7 @@ from .commands import (
     build_strategy,
     full_run,
     prepare,
+    probe_select,
     rerun,
     report,
     retry_decide,
@@ -72,6 +73,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Phase 6: emit scaffolded test files (it.todo stubs) from scenarios shards.",
     )
     p_scaf.add_argument("--project", default=None)
+    p_scaf.add_argument(
+        "--probe-only",
+        action="store_true",
+        dest="probe_only",
+        help="Emit only probe-tagged scenarios under tests/qa-agent/_probe/.",
+    )
     p_scaf.set_defaults(func=scaffold.run)
 
     p_run = sub.add_parser(
@@ -81,7 +88,27 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--project", default=None)
     p_run.add_argument("--skip-install", action="store_true")
     p_run.add_argument("--timeout", type=int, default=300)
+    p_run.add_argument(
+        "--probe-only",
+        action="store_true",
+        dest="probe_only",
+        help="Run only the Phase 3.5 probe tests (under tests/qa-agent/_probe/).",
+    )
     p_run.set_defaults(func=run_tests.run)
+
+    p_probe = sub.add_parser(
+        "probe-select",
+        help="Phase 3.5 gate: read probe_analysis.json + probe_report.md, "
+             "prompt the operator for each suggested override, write user_overrides.json.",
+    )
+    p_probe.add_argument("--project", default=None)
+    p_probe.add_argument(
+        "--non-interactive",
+        action="store_true",
+        dest="non_interactive",
+        help="Accept every suggested override without prompting.",
+    )
+    p_probe.set_defaults(func=probe_select.run)
 
     p_dec = sub.add_parser(
         "retry-decide",

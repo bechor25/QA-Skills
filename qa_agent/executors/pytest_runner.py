@@ -19,9 +19,16 @@ class PytestRunner(Executor):
     def available(self, project_root: Path) -> bool:
         return shutil.which("pytest") is not None or shutil.which("python") is not None
 
-    def run(self, project_root: Path, test_files: list[str], timeout: int) -> ExecutionResult:
+    def run(
+        self,
+        project_root: Path,
+        test_files: list[str],
+        timeout: int,
+        category: str | None = None,
+    ) -> ExecutionResult:
+        effective_category = category or self.category
         if not test_files:
-            return ExecutionResult(framework=self.framework, category=self.category)
+            return ExecutionResult(framework=self.framework, category=effective_category)
         with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as f:
             junit_path = Path(f.name)
         try:
@@ -34,7 +41,7 @@ class PytestRunner(Executor):
                 passed, failed, skipped = _parse_summary(proc.stdout_tail + "\n" + proc.stderr_tail)
             return ExecutionResult(
                 framework=self.framework,
-                category=self.category,
+                category=effective_category,
                 test_files=test_files,
                 passed=passed,
                 failed=failed,

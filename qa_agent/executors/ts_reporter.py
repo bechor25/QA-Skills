@@ -28,6 +28,28 @@ from pathlib import Path
 from .base import PerTestRecord, extract_scenario_id
 
 
+def parse_jest_style_json_file(
+    report_path: Path,
+    project_root: Path,
+    fallback_stdout: str = "",
+) -> tuple[int, int, int, list[PerTestRecord]]:
+    """Same shape as ``parse_jest_style_json`` but reads the JSON from
+    ``report_path`` written via ``--outputFile`` / ``--reporter=json``.
+
+    Falls back to ``fallback_stdout`` when the file is missing or
+    empty (e.g. runner crashed before writing).
+    """
+    text = ""
+    try:
+        if report_path.exists():
+            text = report_path.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    if not text:
+        text = fallback_stdout
+    return parse_jest_style_json(text, project_root)
+
+
 def parse_jest_style_json(
     stdout: str,
     project_root: Path,

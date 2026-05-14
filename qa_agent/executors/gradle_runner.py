@@ -24,14 +24,21 @@ class GradleRunner(Executor):
             return True
         return shutil.which("gradle") is not None
 
-    def run(self, project_root: Path, test_files: list[str], timeout: int) -> ExecutionResult:
+    def run(
+        self,
+        project_root: Path,
+        test_files: list[str],
+        timeout: int,
+        category: str | None = None,
+    ) -> ExecutionResult:
+        effective_category = category or self.category
         wrapper = project_root / "gradlew"
         cmd = [str(wrapper), "test"] if wrapper.exists() else ["gradle", "test"]
         proc = run_subprocess(cmd, cwd=project_root, timeout=timeout)
         passed, failed, skipped = _parse(proc.stdout_tail + proc.stderr_tail)
         return ExecutionResult(
             framework=self.framework,
-            category=self.category,
+            category=effective_category,
             test_files=test_files,
             passed=passed,
             failed=failed,

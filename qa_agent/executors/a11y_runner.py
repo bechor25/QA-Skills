@@ -18,8 +18,15 @@ class A11yRunner(Executor):
     def available(self, project_root: Path) -> bool:
         return self._pw.available(project_root)
 
-    def run(self, project_root: Path, test_files: list[str], timeout: int) -> ExecutionResult:
-        result = self._pw.run(project_root, test_files, timeout)
+    def run(
+        self,
+        project_root: Path,
+        test_files: list[str],
+        timeout: int,
+        category: str | None = None,
+    ) -> ExecutionResult:
+        effective_category = category or self.category
+        result = self._pw.run(project_root, test_files, timeout, category=effective_category)
         # Rebrand the category so the report rolls it up as accessibility.
-        result.category = self.category
+        result.category = effective_category
         return result

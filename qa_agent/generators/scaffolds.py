@@ -59,6 +59,7 @@ def emit_scaffold_group(
     language: str,
     runner: str | None = None,
     hints: ScaffoldHints | None = None,
+    probe: bool = False,
 ) -> GeneratedFile:
     """Return a single scaffold file holding stubs for every scenario
     in `(capability, category)`.
@@ -67,6 +68,11 @@ def emit_scaffold_group(
     ``"vitest"`` (default for TS) or ``"jest"``. Python paths always
     use pytest. UI / accessibility always use Playwright regardless
     of ``runner``.
+
+    When ``probe=True``, the emitted file lives under
+    ``tests/qa-agent/_probe/<category>/...`` so the probe gate's
+    cheap one-test-per-capability run is isolated from any real
+    test files that may already exist.
     """
     if not scenarios:
         raise ValueError("emit_scaffold_group: scenarios must be non-empty")
@@ -82,7 +88,21 @@ def emit_scaffold_group(
             or _GROUP_BUILDERS.get(("api", language, _default_runner(language, "api")))
             or _api_vitest_group
         )
-    return builder(capability, scenarios, hints)
+    gf = builder(capability, scenarios, hints)
+    if probe:
+        gf.rel_path = _probe_rewrite(gf.rel_path)
+    return gf
+
+
+def _probe_rewrite(rel_path: str) -> str:
+    """Insert ``_probe/`` after ``tests/qa-agent/`` so the probe
+    pipeline lives in its own subtree and never collides with real
+    test files.
+    """
+    prefix = "tests/qa-agent/"
+    if rel_path.startswith(prefix):
+        return prefix + "_probe/" + rel_path[len(prefix):]
+    return rel_path
 
 
 def emit_scaffold(

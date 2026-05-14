@@ -59,8 +59,22 @@ class Executor(ABC):
         """Return True if the executor can run in this project."""
 
     @abstractmethod
-    def run(self, project_root: Path, test_files: list[str], timeout: int) -> ExecutionResult:
-        """Execute the given test files and return a normalized result."""
+    def run(
+        self,
+        project_root: Path,
+        test_files: list[str],
+        timeout: int,
+        category: str | None = None,
+    ) -> ExecutionResult:
+        """Execute the given test files and return a normalized result.
+
+        ``category`` is the dispatch-site category (api, security,
+        performance, ui, accessibility). When the same framework is
+        reused across several categories (vitest drives api +
+        security + performance), the runner must stamp the result
+        with the actual category so per-runner combined logs and
+        history records do not collide.
+        """
 
 
 # ---------------------------------------------------------------------

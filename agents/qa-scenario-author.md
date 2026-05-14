@@ -17,6 +17,11 @@ or read source code — work from the contract.
 - `project_root`.
 - Target categories from `strategy.json` — typically a subset of
   `{api, ui, security, accessibility, performance, regression}`.
+- `probe_mode` — optional boolean, default `false`. When `true`, the
+  orchestrator is in **Phase 3.5 (probe)**: emit exactly **one
+  scenario per target category** so we can validate contract
+  assumptions against a real run before scaling out. See
+  "Probe mode" below.
 
 ## What to read
 
@@ -31,9 +36,36 @@ Read these files only:
 
 Do **not** read handler source code. The contract already captured it.
 
+## Probe mode
+
+When `probe_mode=true`:
+
+- Emit **exactly one scenario per target category**. No more, no less.
+- Pick the **happy-path / smoke scenario** for each category — the
+  one that exercises the most realistic flow the contract describes.
+  For `security`, that means the canonical negative case
+  (unauthenticated 401); for `accessibility`, the entry page
+  axe-scan; for `performance`, the cheapest p95 measurement.
+- Tag every probe scenario with `"probe"` in `tags` and set
+  `severity` per the table below.
+- Skip the "≥3 scenarios per api category" floor — probe is meant
+  to be **small** so the operator can read all logs at a glance.
+- All other rules (path source per category, contract-only payloads,
+  empty `ui_entry_points` skip) still apply unchanged.
+- Add `"mode": "probe"` to the top-level scenarios JSON so downstream
+  agents (body-author, runner, analyzer) can short-circuit fan-out.
+- Emit the same NN scheme (`sc::<cap>::<cat>::01`) so resume logic
+  can match the probe scenario when the full run replaces it.
+
+After the probe round, the orchestrator re-invokes you with
+`probe_mode=false` (the default) plus a fresh
+`state/user_overrides.json` that captures whatever schema mismatch
+the operator confirmed — you generate the full scenario set then.
+
 ## Scenario coverage rules
 
-For each target category, generate scenarios per these floors:
+For each target category, generate scenarios per these floors
+(**probe_mode=false** only; see "Probe mode" above when `true`):
 
 | Category       | Min scenarios | Required scenario types                                              |
 |----------------|---------------|----------------------------------------------------------------------|

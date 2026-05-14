@@ -66,6 +66,7 @@ dispatch sub-agents.
 | 3a | cluster-capabilities | CLI   | `raw_capability_map.json`                   |
 | 3b | refine-capabilities  | AGENT | `capability_map.json`                       |
 | 3c | build-strategy       | CLI   | `strategy.json`                             |
+| 3.5| **probe gate**       | MIX   | `probe_analysis.json`, `user_overrides.json` |
 | 4  | enrich               | AGENT | `contracts/<capability>.json`               |
 | 5  | author-scenarios     | AGENT | `scenarios/<capability>.json`               |
 | 6  | scaffold             | CLI   | scaffolded test files + `generated_tests.json` |
@@ -86,7 +87,8 @@ STATE="${PROJECT_ROOT}/.qa-agent/state"
 [ -d "$STATE/scenarios" ] && SCENARIOS=$(ls "$STATE/scenarios" | wc -l) || SCENARIOS=0
 [ -f "$STATE/generated_tests.json" ] && SCAFFOLDED=$(jq '.entries | length' "$STATE/generated_tests.json" 2>/dev/null || echo 0) || SCAFFOLDED=0
 [ -d "${PROJECT_ROOT}/tests/qa-agent" ] && STUBS=$(grep -rln 'QA-AGENT-BODY' "${PROJECT_ROOT}/tests/qa-agent/" 2>/dev/null | wc -l) || STUBS=0
-echo "resume: contracts=$CONTRACTS scenarios=$SCENARIOS scaffolded=$SCAFFOLDED stubs=$STUBS"
+[ -f "$STATE/user_overrides.json" ] && OVERRIDES=1 || OVERRIDES=0
+echo "resume: contracts=$CONTRACTS scenarios=$SCENARIOS scaffolded=$SCAFFOLDED stubs=$STUBS overrides=$OVERRIDES"
 ```
 
 Decision matrix (highest-priority match wins):
@@ -96,7 +98,8 @@ Decision matrix (highest-priority match wins):
 | `stubs > 0` and `scaffolded > 0`                                    | **7** (body-author) |
 | `scenarios > 0` and `scaffolded == 0`                               | **6** (scaffold) |
 | `contracts > 0` and `scenarios == 0`                                | **5** (scenarios) |
-| `state/capability_map.json` exists and `contracts == 0`             | **4** (enrich) |
+| `state/capability_map.json` exists and `contracts == 0` and `overrides == 1` | **4** (enrich, overrides apply) |
+| `state/capability_map.json` exists and `contracts == 0` and `overrides == 0` | **3.5** (probe gate first) |
 | `state/raw_capability_map.json` exists and no `capability_map.json` | **3b** (mapper) |
 | Nothing above                                                       | **1** (fresh) |
 
@@ -198,6 +201,79 @@ capability with `subagent_type=qa-scenario-author`. Prompt body:
 > `strategy.json`. Use payload examples from the contract's request
 > schema. For ui / accessibility categories use
 > `ui_entry_points[].route`, never api paths.
+
+### Phase 3.5 — probe gate (MIX) — runs **once**, between strategy and the full enrich/scenario fan-out
+
+The probe is a **gate**, not a replacement. After it lands, the rest
+of the pipeline (phases 4–10) runs exactly as documented below —
+just with `state/user_overrides.json` in place, so qa-enricher emits
+contracts that match what the running app actually does.
+
+Skip the probe gate **only** when `state/user_overrides.json` already
+exists from a previous run on the same project AND the operator has
+not asked for a clean rebuild — that file is the durable artifact
+this phase produces, and it does not expire.
+
+Otherwise run the probe loop in this order:
+
+1. **Initial enrich (no overrides).** Fan out `qa-enricher` per
+   capability exactly as Phase 4 below describes. The first pass
+   uses code reading only — `user_overrides.json` does not exist
+   yet, so the enricher behaves as if the override field were
+   absent.
+2. **Probe scenarios.** Fan out `qa-scenario-author` per capability
+   with the prompt extended to set `probe_mode=true`. Each agent
+   emits exactly one scenario per target category (top-level
+   `mode: "probe"`, every scenario tagged `["probe"]`).
+3. **Scaffold the probe set.**
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" scaffold --probe-only --project "${PROJECT_ROOT}"
+   ```
+   The `--probe-only` flag tells the scaffold emitter to read only
+   probe-tagged scenarios and to write its output under
+   `tests/qa-agent/_probe/<category>/<capability>.spec.*`. Real test
+   files (if any survive from a previous run under
+   `tests/qa-agent/<category>/`) are left untouched.
+4. **Fill probe bodies.** Same fan-out shape as Phase 7, but the
+   batch list is tiny (one scenario per `(cap, cat)` pair).
+   Concurrent dispatch in one assistant message.
+5. **Run the probe.**
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" run-tests --probe-only --skip-install --project "${PROJECT_ROOT}"
+   ```
+   `--probe-only` scopes the runner to `tests/qa-agent/_probe/`.
+6. **Analyze.** Spawn **one** `Agent` call with
+   `subagent_type=qa-probe-analyzer`. Prompt body:
+   > Project root: `${PROJECT_ROOT}`. Run id: `<latest run id>`.
+   > Language: `he`. Read every probe scenario log under
+   > `runs/<run_id>/logs/`, classify per the qa-probe-analyzer
+   > pattern table, and emit `state/probe_analysis.json` plus the
+   > Hebrew operator file `state/probe_report.md`.
+7. **Operator confirmation.**
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" probe-select --project "${PROJECT_ROOT}"
+   ```
+   Reads `probe_report.md` + `probe_analysis.json`, prompts the
+   operator with each Hebrew question (defaults pre-filled), and
+   writes the confirmed overrides to
+   `state/user_overrides.json`. If the operator declines all
+   suggestions, the file is still written but empty
+   (`{ "_decisions": "no overrides applied" }`) so resume logic
+   knows the probe has run.
+8. **Cleanup probe scaffolds.** Remove `tests/qa-agent/_probe/` and
+   delete the probe-tagged scenarios from `scenarios/<cap>.json`
+   (the next scenario-author pass overwrites them anyway with the
+   full set).
+9. **Continue at Phase 4.** Re-dispatch `qa-enricher` per
+   capability — this time the agent finds
+   `state/user_overrides.json` and applies the operator's answers
+   on top of the code-derived contract. The rest of the pipeline
+   (phase 5 onward) is unchanged.
+
+If step 6 returns any `infra` verdict, **halt the pipeline** with a
+one-line Hebrew message describing what the operator must fix
+(e.g. `"DATABASE_URL חסר ב-environment — הגדר ונסה שוב"`). Re-running
+the probe after a fix takes a fraction of the cost of a full run.
 
 ### Phase 6 — scaffold (CLI)
 

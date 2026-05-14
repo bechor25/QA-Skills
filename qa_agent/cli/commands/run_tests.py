@@ -34,6 +34,18 @@ def run(args: argparse.Namespace) -> int:
         log.warning("run-tests: no generated tests found — did you run `scaffold`?")
         return 0
 
+    if getattr(args, "probe_only", False):
+        before = len(generated.entries)
+        generated.entries = [e for e in generated.entries if "/_probe/" in e.path]
+        log.info(
+            "run-tests: --probe-only scoped to %d/%d probe tests",
+            len(generated.entries),
+            before,
+        )
+        if not generated.entries:
+            log.warning("run-tests: --probe-only set but no probe tests found")
+            return 0
+
     if getattr(args, "skip_install", False):
         log.info("run-tests: --skip-install set, assuming dependencies are ready")
     else:

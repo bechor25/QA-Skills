@@ -38,25 +38,32 @@ class SecurityRunner(Executor):
             or self._jest.available(project_root)
         )
 
-    def run(self, project_root: Path, test_files: list[str], timeout: int) -> ExecutionResult:
+    def run(
+        self,
+        project_root: Path,
+        test_files: list[str],
+        timeout: int,
+        category: str | None = None,
+    ) -> ExecutionResult:
+        effective_category = category or self.category
         py = [t for t in test_files if t.endswith(".py")]
         ts = [t for t in test_files if t.endswith((".ts", ".tsx", ".js"))]
         results: list[ExecutionResult] = []
         if py and self._py.available(project_root):
-            results.append(self._py.run(project_root, py, timeout))
+            results.append(self._py.run(project_root, py, timeout, category=effective_category))
         if ts:
             runner = self._pick_ts_runner(project_root, ts)
             if runner.available(project_root):
-                results.append(runner.run(project_root, ts, timeout))
+                results.append(runner.run(project_root, ts, timeout, category=effective_category))
 
         if not results:
-            return ExecutionResult(framework=self.framework, category=self.category)
+            return ExecutionResult(framework=self.framework, category=effective_category)
         merged_records = []
         for r in results:
             merged_records.extend(r.per_test_records)
         merged = ExecutionResult(
             framework=self.framework,
-            category=self.category,
+            category=effective_category,
             test_files=test_files,
             passed=sum(r.passed for r in results),
             failed=sum(r.failed for r in results),

@@ -19,9 +19,16 @@ class PlaywrightRunner(Executor):
             return True
         return shutil.which("npx") is not None
 
-    def run(self, project_root: Path, test_files: list[str], timeout: int) -> ExecutionResult:
+    def run(
+        self,
+        project_root: Path,
+        test_files: list[str],
+        timeout: int,
+        category: str | None = None,
+    ) -> ExecutionResult:
+        effective_category = category or self.category
         if not test_files:
-            return ExecutionResult(framework=self.framework, category=self.category)
+            return ExecutionResult(framework=self.framework, category=effective_category)
         cmd = self._command(project_root, test_files)
         env = {"PLAYWRIGHT_JSON_OUTPUT_NAME": "playwright-report.json"}
         proc = run_subprocess(cmd, cwd=project_root, timeout=timeout, env=env)
@@ -31,7 +38,7 @@ class PlaywrightRunner(Executor):
             failed = len(test_files)
         return ExecutionResult(
             framework=self.framework,
-            category=self.category,
+            category=effective_category,
             test_files=test_files,
             passed=passed,
             failed=failed,

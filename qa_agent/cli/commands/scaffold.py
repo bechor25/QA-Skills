@@ -38,25 +38,31 @@ def run(args: argparse.Namespace) -> int:
     api_runner = pm.test_runners.get("api")
     plan = sm.load(schemas.TestDataPlan)
     hints = scaffolds.ScaffoldHints.from_plan(plan)
+    probe_only = bool(getattr(args, "probe_only", False))
 
     log.info(
-        "scaffold: language=%s api_runner=%s ui_runner=%s",
+        "scaffold: language=%s api_runner=%s ui_runner=%s probe_only=%s",
         target_language,
         api_runner or "(default)",
         pm.test_runners.get("ui") or "(none)",
+        probe_only,
     )
 
     shards = sm.list_scenario_capabilities()
     if shards:
         log.info("scaffold: using sharded scenarios for %d capabilities", len(shards))
-        entries, files_written = _scaffold_from_shards(sm, root, shards, target_language, api_runner, hints)
+        entries, files_written = _scaffold_from_shards(
+            sm, root, shards, target_language, api_runner, hints, probe_only=probe_only
+        )
     else:
         legacy = sm.load(schemas.Scenarios)
         log.info(
             "scaffold: no shards found, falling back to legacy scenarios.json (%d entries)",
             len(legacy.entries),
         )
-        entries, files_written = _scaffold_from_legacy(root, legacy, target_language, api_runner, hints)
+        entries, files_written = _scaffold_from_legacy(
+            root, legacy, target_language, api_runner, hints, probe_only=probe_only
+        )
 
     generated = schemas.GeneratedTests(built_at=datetime.now(timezone.utc), entries=entries)
     sm.save(generated)
@@ -92,16 +98,27 @@ def _scaffold_from_shards(
     target_language: str,
     api_runner: str | None,
     hints: scaffolds.ScaffoldHints,
+    probe_only: bool = False,
 ) -> tuple[list[schemas.GeneratedTest], int]:
     grouped: dict[tuple[str, str], list[schemas.RichScenario]] = defaultdict(list)
     for cap in shards:
         sh = sm.load_capability_scenarios(cap)
         if sh is None:
             continue
+        is_probe_file = bool(getattr(sh, "mode", "") == "probe")
         for sc in sh.scenarios:
+            tags = list(getattr(sc, "tags", []) or [])
+            sc_is_probe = is_probe_file or "probe" in tags
+            if probe_only and not sc_is_probe:
+                continue
+            if (not probe_only) and sc_is_probe:
+                # Real-run scaffolding skips probe-tagged scenarios — they
+                # were throwaway. The next scenario-author pass overwrites
+                # the capability's scenarios file with the full set.
+                continue
             grouped[(sc.capability, sc.category)].append(sc)
 
-    return _emit_groups(root, grouped, target_language, api_runner, hints)
+    return _emit_groups(root, grouped, target_language, api_runner, hints, probe=probe_only)
 
 
 def _scaffold_from_legacy(
@@ -110,11 +127,24 @@ def _scaffold_from_legacy(
     target_language: str,
     api_runner: str | None,
     hints: scaffolds.ScaffoldHints,
+    probe_only: bool = False,
 ) -> tuple[list[schemas.GeneratedTest], int]:
     grouped: dict[tuple[str, str], list[schemas.Scenario]] = defaultdict(list)
     for sc in legacy.entries:
+        if probe_only:
+            # Legacy scenarios.json has no tags concept; skip the
+            # probe-only path entirely.
+            continue
         grouped[(sc.capability, sc.category)].append(sc)
-    return _emit_groups(root, grouped, target_language, api_runner, hints, feature_id_fn=lambda sc: sc.feature_id)
+    return _emit_groups(
+        root,
+        grouped,
+        target_language,
+        api_runner,
+        hints,
+        feature_id_fn=lambda sc: sc.feature_id,
+        probe=probe_only,
+    )
 
 
 def _emit_groups(
@@ -124,6 +154,7 @@ def _emit_groups(
     api_runner: str | None,
     hints: scaffolds.ScaffoldHints,
     feature_id_fn=None,
+    probe: bool = False,
 ) -> tuple[list[schemas.GeneratedTest], int]:
     entries: list[schemas.GeneratedTest] = []
     files_written = 0
@@ -139,6 +170,7 @@ def _emit_groups(
             language=target_language,
             runner=api_runner,
             hints=hints,
+            probe=probe,
         )
         write_file(root, gf)
         files_written += 1

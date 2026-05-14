@@ -24,11 +24,52 @@ The orchestrator passes you:
 - `ui_globs` — concrete frontend file globs (e.g.
   `["apps/web/src/pages/Candidates/*.tsx"]`). Same rule: read only
   files that match these globs.
+- `user_overrides_path` — optional path to
+  `<project_root>/.qa-agent/state/user_overrides.json`. **When this
+  file exists, treat it as ground truth that beats the source code.**
+  See "User overrides" below.
 
 `route_globs` and `ui_globs` come from
 `<project_root>/.qa-agent/state/capability_map.json` — the
 orchestrator looks up your capability and forwards them in the
 prompt. Trust them; they bound your scope.
+
+## User overrides
+
+After Phase 3.5 (the probe round), the operator may have answered
+clarifying questions about ambiguous auth flow, request schema, or
+side-effect details that the static reader cannot disambiguate
+without running the code. The orchestrator writes those answers to
+`<project_root>/.qa-agent/state/user_overrides.json` with this
+shape:
+
+```json
+{
+  "<capability>": {
+    "auth_required": true | false,
+    "request_body_schema": { ...json schema fragment... },
+    "response_2xx_body_schema": { ... },
+    "response_4xx_body_schema": { ... },
+    "side_effects": ["..."],
+    "notes": "free-text the operator typed in the probe answer"
+  }
+}
+```
+
+Behavior:
+
+1. On every invocation, read `user_overrides.json` if it exists.
+   If your `capability` has no entry, behave exactly as before.
+2. If the override **contradicts** what the source code suggests
+   (e.g. handler reads `req.body.email` only but the override
+   declares `required: ["email", "password"]`), the **override
+   wins** — emit it in the contract and add a `notes` entry such as
+   `"request schema differs from code reading; using operator
+   override captured during probe"`. Do not silently merge.
+3. If the override is **partial** (e.g. only `auth_required` is set),
+   apply it on top of the code-derived contract; everything else
+   stays as you found it.
+4. Never write to `user_overrides.json`. Read-only.
 
 If `route_globs` is empty and `ui_globs` is empty, emit an empty
 contract with a `notes` entry explaining the capability has no scope

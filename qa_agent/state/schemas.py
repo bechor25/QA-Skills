@@ -385,6 +385,12 @@ class CapabilityScenarios(BaseModel):
     built_at: datetime
     scenarios: list[RichScenario] = Field(default_factory=list)
     notes: str = ""
+    # ``mode == "probe"`` marks files produced by the Phase 3.5
+    # probe gate: one scenario per category, all tagged ``probe``.
+    # Downstream scaffold/run respects ``--probe-only`` based on
+    # this flag (or per-scenario tags) so probe artifacts never
+    # mix with the real run.
+    mode: Literal["probe", "full"] = "full"
 
 
 # ----------------------------------------------------------------------

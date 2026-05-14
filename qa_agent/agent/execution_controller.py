@@ -53,7 +53,7 @@ def execute_all(
             continue
         started = datetime.now(timezone.utc)
         log.info("execute: %s/%s — %d files", framework, category, len(paths))
-        result = executor.run(project_root, paths, timeout)
+        result = executor.run(project_root, paths, timeout, category=category)
         results.append(result)
         written = persist_per_test_logs(run_dir(str(project_root), run_id), result)
         if written:
