@@ -21,6 +21,10 @@ from .commands import (
     analyze,
     build_strategy,
     full_run,
+    heal_apply,
+    heal_diagnose,
+    heal_rerun,
+    heal_status,
     prepare,
     probe_select,
     rerun,
@@ -126,6 +130,80 @@ def _build_parser() -> argparse.ArgumentParser:
         default="changed",
     )
     p_rerun.set_defaults(func=rerun.run)
+
+    p_hdiag = sub.add_parser(
+        "heal-diagnose",
+        help="Run the failed scope, capture structured per-test failures, "
+             "and root-cause-cluster them (systemic vs per_test).",
+    )
+    p_hdiag.add_argument("--project", default=None)
+    p_hdiag.add_argument("--timeout", type=int, default=300)
+    p_hdiag.add_argument(
+        "--no-run",
+        action="store_true",
+        dest="no_run",
+        help="Reparse the latest run's per-test logs instead of executing.",
+    )
+    p_hdiag.set_defaults(func=heal_diagnose.run)
+
+    p_happly = sub.add_parser(
+        "heal-apply",
+        help="Apply a scoped fix (full-file body or unified diff) with a "
+             "rollback snapshot, or --revert an iteration. App source is rejected.",
+    )
+    p_happly.add_argument("--project", default=None)
+    p_happly.add_argument("--target", default=None, help="Repo-relative file to write.")
+    p_happly.add_argument(
+        "--patch",
+        default="-",
+        help="Path to a patch/body file, or '-' for stdin (default).",
+    )
+    p_happly.add_argument("--iteration", type=int, default=1)
+    p_happly.add_argument(
+        "--kind",
+        choices=["test", "harness", "config", "seed", "dep"],
+        default="test",
+    )
+    p_happly.add_argument("--cluster-id", default="", dest="cluster_id")
+    p_happly.add_argument(
+        "--dep",
+        default="",
+        help="For --kind dep: '<manager> <pkg...>' (e.g. 'npm -D @playwright/test').",
+    )
+    p_happly.add_argument(
+        "--revert",
+        type=int,
+        default=None,
+        help="Revert every file snapshotted in this iteration number.",
+    )
+    p_happly.set_defaults(func=heal_apply.run)
+
+    p_hrerun = sub.add_parser(
+        "heal-rerun",
+        help="Scoped re-execution + heal-ledger pass-rate delta append.",
+    )
+    p_hrerun.add_argument("--project", default=None)
+    p_hrerun.add_argument(
+        "--scope",
+        choices=["flaky", "changed", "failed", "all"],
+        default="failed",
+    )
+    p_hrerun.add_argument("--timeout", type=int, default=300)
+    p_hrerun.add_argument("--iteration", type=int, default=None)
+    p_hrerun.add_argument(
+        "--tier",
+        choices=["systemic", "per_test", "mixed"],
+        default="mixed",
+    )
+    p_hrerun.set_defaults(func=heal_rerun.run)
+
+    p_hstat = sub.add_parser(
+        "heal-status",
+        help="Emit the loop decision JSON (continue|plateau|cap|done|rollback). "
+             "Read-only; the test-fixer skill drives the loop from it.",
+    )
+    p_hstat.add_argument("--project", default=None)
+    p_hstat.set_defaults(func=heal_status.run)
 
     p_report = sub.add_parser("report", help="Render the latest HTML report.")
     p_report.add_argument("--project", default=None)

@@ -120,5 +120,5 @@ def test_render_html_writes_file(tmp_path: Path):
     assert html_path.exists()
     text = html_path.read_text(encoding="utf-8")
     assert "QA Agent" in text
-    assert "Quality score" in text
+    assert "ציון איכות" in text  # report template is Hebrew (RTL)
     assert "auth" in text

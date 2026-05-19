@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from qa_agent.agent.execution_controller import _pick_executor, execute_all
-from qa_agent.executors.jest_runner import _parse_jest_json
+from qa_agent.executors.ts_reporter import parse_jest_style_json
 from qa_agent.executors.maven_runner import _parse as _parse_maven
 from qa_agent.executors.pytest_runner import _parse_summary as _parse_pytest
 from qa_agent.runtime.install_planner import plan_installs
@@ -16,14 +17,14 @@ from qa_agent.state import schemas
 
 
 def test_process_manager_captures_output(tmp_path: Path):
-    r = run_subprocess(["python", "-c", "import sys; print('hello'); sys.exit(7)"], cwd=tmp_path, timeout=10)
+    r = run_subprocess([sys.executable, "-c", "import sys; print('hello'); sys.exit(7)"], cwd=tmp_path, timeout=10)
     assert r.exit_code == 7
     assert "hello" in r.stdout_tail
     assert not r.timed_out
 
 
 def test_process_manager_kills_on_timeout(tmp_path: Path):
-    r = run_subprocess(["python", "-c", "import time; time.sleep(5)"], cwd=tmp_path, timeout=1)
+    r = run_subprocess([sys.executable, "-c", "import time; time.sleep(5)"], cwd=tmp_path, timeout=1)
     assert r.timed_out is True
     assert r.exit_code == -1
 
@@ -72,9 +73,10 @@ def test_pytest_summary_parse():
     assert _parse_pytest(out) == (12, 5, 1)
 
 
-def test_jest_json_parse():
+def test_jest_json_parse(tmp_path: Path):
     out = '... before junk\n{"numPassedTests": 4, "numFailedTests": 1, "numPendingTests": 2}'
-    assert _parse_jest_json(out) == (4, 1, 2)
+    passed, failed, skipped, _ = parse_jest_style_json(out, tmp_path)
+    assert (passed, failed, skipped) == (4, 1, 2)
 
 
 def test_maven_summary_parse():

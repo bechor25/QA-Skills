@@ -66,5 +66,5 @@ def test_report_command_writes_html(tmp_path: Path):
     html_files = list(runs.glob("*/report.html"))
     assert html_files, "no report.html generated"
     text = html_files[-1].read_text(encoding="utf-8")
-    assert "Quality score" in text
+    assert "ציון איכות" in text  # report template is Hebrew (RTL)
     assert "auth" in text or "payments" in text

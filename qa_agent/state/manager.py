@@ -37,6 +37,10 @@ _FILES = {
     schemas.RetryBudgetState: "retry_budget.json",
     schemas.RawCapabilityMap: "raw_capability_map.json",
     schemas.CapabilityMap: "capability_map.json",
+    schemas.HealFailures: "heal_failures.json",
+    schemas.HealClusters: "heal_clusters.json",
+    schemas.HealJournal: "heal_journal.json",
+    schemas.HealLedger: "heal_ledger.json",
 }
 
 
@@ -109,6 +113,18 @@ class StateManager:
     def flaky_state(self) -> schemas.FlakyState:
         return self.load(schemas.FlakyState)
 
+    def heal_failures(self) -> schemas.HealFailures:
+        return self.load(schemas.HealFailures)
+
+    def heal_clusters(self) -> schemas.HealClusters:
+        return self.load(schemas.HealClusters)
+
+    def heal_journal(self) -> schemas.HealJournal:
+        return self.load(schemas.HealJournal)
+
+    def heal_ledger(self) -> schemas.HealLedger:
+        return self.load(schemas.HealLedger)
+
     # ---- defaults ----
 
     def _empty(self, model: type[T]) -> T:
@@ -145,6 +161,14 @@ class StateManager:
             return model(built_at=now)  # type: ignore[return-value]
         if model is schemas.CapabilityMap:
             return model(built_at=now)  # type: ignore[return-value]
+        if model is schemas.HealFailures:
+            return model(built_at=now)  # type: ignore[return-value]
+        if model is schemas.HealClusters:
+            return model(built_at=now)  # type: ignore[return-value]
+        if model is schemas.HealJournal:
+            return model()  # type: ignore[return-value]
+        if model is schemas.HealLedger:
+            return model()  # type: ignore[return-value]
         raise StateError(f"no default for model {model.__name__}")
 
     # ---- sharded state (per-capability / per-test) ----

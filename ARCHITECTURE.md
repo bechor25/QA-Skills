@@ -28,10 +28,10 @@ The system is built around a simple split:
 
 | Layer | Main files | Connects to |
 |---|---|---|
-| Skill entry | [skills/test-orchestrator/SKILL.md](skills/test-orchestrator/SKILL.md) | `qa-agent` CLI, `qa-capability-mapper`, `qa-enricher`, `qa-scenario-author`, `qa-body-author`, `qa-triage` |
+| Skill entry | [skills/test-orchestrator/SKILL.md](skills/test-orchestrator/SKILL.md), [skills/test-fixer/SKILL.md](skills/test-fixer/SKILL.md) | `qa-agent` CLI, `qa-capability-mapper`, `qa-enricher`, `qa-scenario-author`, `qa-body-author`, `qa-triage`, `qa-ops-diagnostician`, `qa-test-fixer` |
 | Other skills | [skills/analyze-project/SKILL.md](skills/analyze-project/SKILL.md), [skills/rerun/SKILL.md](skills/rerun/SKILL.md), [skills/view-report/SKILL.md](skills/view-report/SKILL.md) | direct CLI subcommands |
-| CLI | [qa_agent/cli/__main__.py](qa_agent/cli/__main__.py) and `qa_agent/cli/commands/*` | scanners, quality, generators, runtime, executors, report |
-| Agents | [agents/qa-capability-mapper.md](agents/qa-capability-mapper.md), [agents/qa-enricher.md](agents/qa-enricher.md), [agents/qa-scenario-author.md](agents/qa-scenario-author.md), [agents/qa-body-author.md](agents/qa-body-author.md), [agents/qa-triage.md](agents/qa-triage.md) | sharded state files |
+| CLI | [qa_agent/cli/__main__.py](qa_agent/cli/__main__.py) and `qa_agent/cli/commands/*` | scanners, quality, generators, runtime, executors, report, healing |
+| Agents | [agents/qa-capability-mapper.md](agents/qa-capability-mapper.md), [agents/qa-enricher.md](agents/qa-enricher.md), [agents/qa-scenario-author.md](agents/qa-scenario-author.md), [agents/qa-body-author.md](agents/qa-body-author.md), [agents/qa-triage.md](agents/qa-triage.md), [agents/qa-ops-diagnostician.md](agents/qa-ops-diagnostician.md), [agents/qa-test-fixer.md](agents/qa-test-fixer.md) | sharded state files |
 | State | [qa_agent/state/schemas.py](qa_agent/state/schemas.py), [qa_agent/state/manager.py](qa_agent/state/manager.py) | every other layer |
 | Scanners | `qa_agent/scanners/*` | `project_map.json`, `dependency_graph.json`, `knowledge_graph.json`, `risk_matrix.json`, `raw_capability_map.json`, `ui_selectors.json` |
 | Quality | `qa_agent/quality/*` | strategy, capability discovery, scenarios, validators |
@@ -72,6 +72,27 @@ The system is built around a simple split:
 | Scenario authoring | `qa-scenario-author` | contract, strategy, risk matrix | `scenarios/<cap>.json` |
 | Body authoring | `qa-body-author` | contract, scenarios, scaffolded file | filled test file |
 | Failure triage | `qa-triage` | failing test log, test file, contract | `critique/<test_id>.json` |
+
+### Heal sub-flow (skills/test-fixer — runs after a completed run)
+
+A second top-level skill that improves a finished run instead of
+producing one. It loops, gated by plateau / max-iterations / per-test
+budget, and rolls an iteration back if it lowers the pass-rate.
+
+| Step | Owner | Command / agent | Reads | Writes |
+|---|---|---|---|---|
+| Diagnose | CLI | `heal-diagnose` | failed scope, per-test logs, `critique/*` (optional) | `heal_failures.json`, `heal_clusters.json` |
+| Shared fix | AGENT | `qa-ops-diagnostician` (×1) | `heal_clusters.json`, sampled logs, contracts | harness/config/seed edits, `heal_shared_fix_plan.json`, prod-bug `critique/*` |
+| Apply | CLI | `heal-apply` | a patch/body or `--revert N` | target file + `heal_journal.json` snapshot |
+| Rerun | CLI | `heal-rerun` | `generated_tests.json`, scope | `execution_history.json`, `heal_ledger.json` delta |
+| Per-test fix | AGENT | `qa-test-fixer` (×N, parallel) | one failing test + scenario + contract | bounded test edit or `critique/<id>.json` |
+| Decide | CLI | `heal-status` | `heal_ledger.json`, `retry_budget.json` | loop decision JSON (stdout, read-only) |
+
+The deterministic half lives in `qa_agent/healing/{cluster,loop,patcher}.py`.
+Edit scope is gated in `patcher.py`: tests / shared harness / framework
+config / declared seed / deps are writable; application source is hard-
+rejected, so a reported `prod-bug` stays failing and cannot inflate the
+score.
 
 ## 4. State Relationships
 

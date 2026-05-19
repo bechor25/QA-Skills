@@ -512,3 +512,113 @@ class RawCapabilityMap(BaseModel):
     schema_version: int = 1
     built_at: datetime
     capabilities: list[DiscoveredCapability] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# heal_failures.json  (single file)
+# Structured per-test failure capture produced by `heal-diagnose`.
+# Fills the gap that PerTestRecord is never persisted as state today —
+# the executors only write free-text logs under runs/<id>/logs/.
+# ----------------------------------------------------------------------
+
+class HealFailureRecord(BaseModel):
+    test_id: str
+    test_path: str = ""
+    scenario_id: str = ""
+    status: str = "failed"            # failed | timed_out | error
+    error_message: str = ""
+    error_stack: str = ""
+    normalized_signature: str = ""    # see healing.cluster._normalize
+    failure_category: str = ""        # FailureCategory from classifiers
+    cluster_id: str = ""
+
+
+class HealFailures(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    run_id: str = ""
+    records: list[HealFailureRecord] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# heal_clusters.json  (single file)
+# Root-cause groups: systemic (one shared fix unblocks many) vs per_test.
+# ----------------------------------------------------------------------
+
+class HealCluster(BaseModel):
+    cluster_id: str
+    tier: Literal["systemic", "per_test"]
+    category: str = "unknown"         # FailureCategory
+    signature: str = ""              # representative normalized signature
+    member_test_ids: list[str] = Field(default_factory=list)
+    member_paths: list[str] = Field(default_factory=list)
+    shared_signal: str = ""          # auth-storage-state | missing-import:<m> | db-seed | dep | config
+    suggested_fix_kind: Literal["harness", "config", "seed", "dep", "test", "unknown"] = "unknown"
+    suggested_target: str = ""
+    size: int = 0
+    is_prod_bug: bool = False        # app violates its own contract — never auto-fixed
+    rationale: str = ""
+
+
+class HealClusters(BaseModel):
+    schema_version: int = 1
+    built_at: datetime
+    run_id: str = ""
+    systemic: list[HealCluster] = Field(default_factory=list)
+    per_test: list[HealCluster] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# heal_journal.json  (single file)
+# Per-iteration file snapshots so an iteration can be rolled back when it
+# lowers the pass-rate. Snapshots live under runs/<run_id>/heal/snapshots/.
+# ----------------------------------------------------------------------
+
+class HealFileSnapshot(BaseModel):
+    path: str                        # repo-relative target
+    snapshot_path: str               # abs path of the saved copy
+    existed_before: bool = True      # false => revert means delete
+    kind: Literal["test", "harness", "config", "seed", "dep"] = "test"
+    cluster_id: str = ""
+    sha_before: str = ""
+    sha_after: str = ""
+
+
+class HealIterationJournal(BaseModel):
+    iteration: int
+    run_id: str = ""
+    started_at: datetime
+    snapshots: list[HealFileSnapshot] = Field(default_factory=list)
+    reverted: bool = False
+
+
+class HealJournal(BaseModel):
+    schema_version: int = 1
+    iterations: list[HealIterationJournal] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
+# heal_ledger.json  (single file)
+# Per-iteration pass deltas + the loop-control thresholds. Read-only
+# consumed by healing.loop.heal_decision (the stop predicate).
+# ----------------------------------------------------------------------
+
+class HealIterationRecord(BaseModel):
+    iteration: int
+    run_id: str = ""
+    pass_before: int = 0
+    pass_after: int = 0
+    total: int = 0
+    pass_rate_before: float = 0.0
+    pass_rate_after: float = 0.0
+    delta: float = 0.0
+    tier: Literal["systemic", "per_test", "mixed"] = "mixed"
+    rolled_back: bool = False
+    finished_at: datetime
+
+
+class HealLedger(BaseModel):
+    schema_version: int = 1
+    max_iterations: int = 4
+    plateau_threshold: float = 0.05
+    records: list[HealIterationRecord] = Field(default_factory=list)

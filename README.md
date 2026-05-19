@@ -56,6 +56,10 @@ qa-agent scaffold       [--project PATH]
 qa-agent run-tests      [--project PATH] [--skip-install] [--timeout SECONDS]
 qa-agent retry-decide   [--project PATH]
 qa-agent rerun          [--project PATH] [--scope flaky|changed|failed|all]
+qa-agent heal-diagnose  [--project PATH] [--no-run]
+qa-agent heal-apply     [--project PATH] (--target P --kind K | --revert N | --kind dep --dep "...")
+qa-agent heal-rerun     [--project PATH] [--scope failed|all] [--tier systemic|per_test]
+qa-agent heal-status    [--project PATH]
 qa-agent report         [--project PATH] [--open]
 qa-agent state          [--project PATH] show|reset
 qa-agent full-run       [--project PATH] [--categories ...] [--no-llm]
@@ -63,7 +67,9 @@ qa-agent full-run       [--project PATH] [--categories ...] [--no-llm]
 
 ## Architecture
 
-- **Skill first.** `test-orchestrator` is the user-facing entry point.
+- **Skill first.** `test-orchestrator` runs the pipeline; `test-fixer`
+  (`heal tests` / `תקן בדיקות`) heals a completed run — shared root-cause
+  fixes first, per-test fan-out for the residue, with rollback safety.
 - **State first.** Persistent data lives under `<project>/.qa-agent/state/`.
 - **Reasoning vs. execution.** LLM agents author bounded artifacts; Python scans and runs.
 - **Grouped generation.** Scaffolds and bodies are grouped by `(capability, category)`.

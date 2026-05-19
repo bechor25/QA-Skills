@@ -11,6 +11,19 @@ run qa
 The `test-orchestrator` skill triggers the full QA flow and returns the path to
 the generated HTML report.
 
+After a run, if pass-rate is low, say:
+
+```text
+heal tests
+```
+
+(`תקן בדיקות` in Hebrew). The `test-fixer` skill operates on the existing run:
+it root-cause-clusters the failures, applies the few shared
+harness/config/seed fixes once, fans out per-test fixers for the residue, and
+loops with rollback safety until quality plateaus. It refuses if there is no
+prior run, never edits application source, and reports product bugs instead of
+patching them (so the score stays honest).
+
 ## CLI reference
 
 ### `qa-agent analyze`
@@ -90,6 +103,28 @@ Re-execute a scoped subset of generated tests.
 ```bash
 qa-agent rerun --project /path --scope changed
 ```
+
+### `qa-agent heal-diagnose` / `heal-apply` / `heal-rerun` / `heal-status`
+
+The deterministic half of the `test-fixer` skill (the heal loop). The skill
+drives these; you rarely call them by hand.
+
+```bash
+qa-agent heal-diagnose --project /path            # cluster failures (systemic vs per_test)
+qa-agent heal-diagnose --project /path --no-run   # reparse last run's logs instead of executing
+qa-agent heal-apply --project /path --target tests/qa-agent/global-setup.ts --kind harness --iteration 1 --patch -
+qa-agent heal-apply --project /path --kind dep --dep "npm -D @playwright/test"
+qa-agent heal-apply --project /path --revert 1    # roll back iteration 1
+qa-agent heal-rerun --project /path --scope all --iteration 1 --tier systemic
+qa-agent heal-status --project /path              # loop decision JSON (read-only)
+```
+
+| File | Owner |
+|---|---|
+| `heal_failures.json` | `heal-diagnose` (structured per-test failures) |
+| `heal_clusters.json` | `heal-diagnose` (root-cause groups) |
+| `heal_journal.json` | `heal-apply` (rollback snapshots) |
+| `heal_ledger.json` | `heal-rerun` (per-iteration pass deltas) |
 
 ### `qa-agent report`
 
