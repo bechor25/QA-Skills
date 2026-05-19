@@ -62,11 +62,44 @@ def _residue_all_exhausted(sm: StateManager) -> bool:
     return True
 
 
+def _collapse_iterations(recs: list[schemas.HealIterationRecord]) -> list[dict]:
+    """Collapse the ledger to one logical step per distinct iteration.
+
+    The skill calls `heal-rerun` twice per loop iteration (`systemic`
+    then `per_test`), so 2 ledger rows can share one `iteration`. The
+    iteration's effective state = its **last** row (per_test runs after
+    systemic); its starting point = its **first** row's `pass_before`.
+    `iteration == 0` is the H0 baseline row and is not a loop iteration.
+    """
+    by_iter: dict[int, list[schemas.HealIterationRecord]] = {}
+    for r in recs:
+        if r.iteration < 1:
+            continue
+        by_iter.setdefault(r.iteration, []).append(r)
+    out: list[dict] = []
+    for it in sorted(by_iter):
+        rows = by_iter[it]
+        first, last = rows[0], rows[-1]
+        out.append({
+            "iteration": it,
+            "pass_before": first.pass_before,
+            "pass_after": last.pass_after,
+            "pass_rate_after": last.pass_rate_after,
+            "total": last.total,
+            "rolled_back": any(x.rolled_back for x in rows),
+        })
+    return out
+
+
 def heal_decision(sm: StateManager) -> dict:
-    """Return the loop decision JSON for `heal-status`."""
+    """Return the loop decision JSON for `heal-status`.
+
+    Counts **distinct loop iterations**, not ledger rows, so the
+    `max_iterations` cap and plateau check reflect actual heal passes.
+    """
     ledger = sm.heal_ledger()
-    recs = ledger.records
-    n = len(recs)
+    steps = _collapse_iterations(ledger.records)
+    n = len(steps)
 
     base_passed, base_total, base_rate = baseline_pass_rate(sm)
 
@@ -82,15 +115,15 @@ def heal_decision(sm: StateManager) -> dict:
                       f"({base_rate:.1%}) — no heal iterations yet",
         }
 
-    last = recs[-1]
-    pass_rate = last.pass_rate_after
-    prev_rate = last.pass_rate_before
-    delta = last.delta
+    cur = steps[-1]
+    prev_rate = steps[-2]["pass_rate_after"] if n >= 2 else base_rate
+    pass_rate = cur["pass_rate_after"]
+    delta = pass_rate - prev_rate
 
     def out(decision: str, reason: str) -> dict:
         return {
             "decision": decision,
-            "iteration": last.iteration,
+            "iteration": n,
             "pass_rate": round(pass_rate, 4),
             "prev_pass_rate": round(prev_rate, 4),
             "delta": round(delta, 4),
@@ -98,10 +131,10 @@ def heal_decision(sm: StateManager) -> dict:
             "reason": reason,
         }
 
-    if last.pass_after < last.pass_before and not last.rolled_back:
+    if cur["pass_after"] < cur["pass_before"] and not cur["rolled_back"]:
         return out("rollback",
-                   f"iteration {last.iteration} regressed "
-                   f"({last.pass_before}->{last.pass_after}) — revert it")
+                   f"iteration {cur['iteration']} regressed "
+                   f"({cur['pass_before']}->{cur['pass_after']}) — revert it")
     if n >= ledger.max_iterations:
         return out("cap", f"max_iterations ({ledger.max_iterations}) reached")
     if pass_rate >= 1.0:

@@ -44,8 +44,8 @@ def test_cluster_collapses_shared_auth_and_keeps_per_test_tail(tmp_path: Path):
     # 10 distinct assertion failures -> per_test residue
     for i in range(10):
         failures.append(schemas.HealFailureRecord(
-            test_id=f"sc::misc::api::{i:02d}",
-            test_path=f"tests/qa-agent/api/misc{i}.spec.ts",
+            test_id=f"sc::tail::api::{i:02d}",
+            test_path=f"tests/qa-agent/api/tail{i}.spec.ts",
             status="failed",
             error_message=f"AssertionError: expected value{i} to equal other{i}",
             normalized_signature=f"assertionerror: expected value{i} to equal other{i}",
@@ -70,8 +70,8 @@ def test_cluster_flags_prod_bug_and_excludes_from_systemic(tmp_path: Path):
     sm = StateManager(tmp_path)
     failures = [
         schemas.HealFailureRecord(
-            test_id=f"sc::pay::api::{i:02d}",
-            test_path="tests/qa-agent/api/pay.spec.ts",
+            test_id=f"sc::sample::api::{i:02d}",
+            test_path="tests/qa-agent/api/sample.spec.ts",
             status="failed",
             error_message="Error: 500 internal server error — unhandled exception",
             normalized_signature="error: # internal server error unhandled exception",
@@ -88,16 +88,16 @@ def test_cluster_flags_prod_bug_and_excludes_from_systemic(tmp_path: Path):
 def test_cluster_triage_verdict_overrides_heuristic(tmp_path: Path):
     sm = StateManager(tmp_path)
     sm.save_triage(schemas.TriageVerdict(
-        test_id="sc::auth::api::01", verdict="prod-bug",
+        test_id="sc::shared::api::01", verdict="prod-bug",
         confidence=0.9, built_at=_now(),
     ))
     failures = [
         schemas.HealFailureRecord(
-            test_id="sc::auth::api::01", test_path="tests/qa-agent/api/a.spec.ts",
+            test_id="sc::shared::api::01", test_path="tests/qa-agent/api/a.spec.ts",
             status="failed", error_message="401 unauthorized",
             normalized_signature="# unauthorized", failure_category="auth"),
         schemas.HealFailureRecord(
-            test_id="sc::auth::api::02", test_path="tests/qa-agent/api/a.spec.ts",
+            test_id="sc::shared::api::02", test_path="tests/qa-agent/api/a.spec.ts",
             status="failed", error_message="401 unauthorized",
             normalized_signature="# unauthorized", failure_category="auth"),
     ]
@@ -121,7 +121,7 @@ def _seed_history(sm: StateManager, passed: int, failed: int, run_id="base"):
 def _residue(sm: StateManager):
     # one un-attempted failure so _residue_all_exhausted is False
     sm.save(schemas.HealFailures(built_at=_now(), records=[
-        schemas.HealFailureRecord(test_id="sc::x::api::01", status="failed")]))
+        schemas.HealFailureRecord(test_id="sc::res::api::01", status="failed")]))
 
 
 def test_loop_baseline_when_no_iterations(tmp_path: Path):
@@ -193,6 +193,90 @@ def test_loop_continue(tmp_path: Path):
         pass_rate_before=0.3, pass_rate_after=0.55, delta=0.25,
         finished_at=_now())]))
     assert heal_decision(sm)["decision"] == "continue"
+
+
+def _iter_rows(iteration, pb, pa, total=100):
+    """The two ledger rows the skill writes per loop iteration:
+    systemic rerun then per_test rerun (both --iteration N)."""
+    mid = (pb + pa) // 2
+    return [
+        schemas.HealIterationRecord(
+            iteration=iteration, run_id=f"r{iteration}s", tier="systemic",
+            pass_before=pb, pass_after=mid, total=total,
+            pass_rate_before=pb / total, pass_rate_after=mid / total,
+            delta=(mid - pb) / total, finished_at=_now()),
+        schemas.HealIterationRecord(
+            iteration=iteration, run_id=f"r{iteration}p", tier="per_test",
+            pass_before=mid, pass_after=pa, total=total,
+            pass_rate_before=mid / total, pass_rate_after=pa / total,
+            delta=(pa - mid) / total, finished_at=_now()),
+    ]
+
+
+def test_loop_two_rows_per_iteration_collapse_to_one(tmp_path: Path):
+    # 2 loop iterations = 4 ledger rows. Must NOT cap (cap is at 4
+    # *distinct* iterations, not 4 rows — this was the early-cap bug).
+    sm = StateManager(tmp_path)
+    _seed_history(sm, 50, 50)
+    _residue(sm)
+    sm.save(schemas.HealLedger(records=[
+        *_iter_rows(1, 30, 50),
+        *_iter_rows(2, 50, 72),
+    ]))
+    d = heal_decision(sm)
+    assert d["iteration"] == 2          # distinct iterations, not 4 rows
+    assert d["decision"] == "continue"  # gain 0.50->0.72 = 0.22 >= 0.05
+
+
+def test_loop_cap_only_at_four_distinct_iterations(tmp_path: Path):
+    sm = StateManager(tmp_path)
+    _seed_history(sm, 50, 50)
+    _residue(sm)
+    rows = []
+    pb = 20
+    for it in range(1, 5):           # 4 iterations x 2 rows = 8 rows
+        pa = pb + 10
+        rows += _iter_rows(it, pb, pa)
+        pb = pa
+    sm.save(schemas.HealLedger(records=rows))
+    d = heal_decision(sm)
+    assert d["iteration"] == 4
+    assert d["decision"] == "cap"
+
+
+def test_loop_rollback_when_per_test_row_drops_below_iteration_start(tmp_path: Path):
+    # systemic lifts 40->60, per_test regresses 60->35: iteration net
+    # 40->35 < its own start -> rollback.
+    sm = StateManager(tmp_path)
+    _seed_history(sm, 50, 50)
+    _residue(sm)
+    sm.save(schemas.HealLedger(records=[
+        schemas.HealIterationRecord(
+            iteration=1, tier="systemic", pass_before=40, pass_after=60,
+            total=100, pass_rate_before=0.4, pass_rate_after=0.6,
+            delta=0.2, finished_at=_now()),
+        schemas.HealIterationRecord(
+            iteration=1, tier="per_test", pass_before=60, pass_after=35,
+            total=100, pass_rate_before=0.6, pass_rate_after=0.35,
+            delta=-0.25, finished_at=_now()),
+    ]))
+    assert heal_decision(sm)["decision"] == "rollback"
+
+
+def test_loop_ignores_baseline_iteration_zero(tmp_path: Path):
+    sm = StateManager(tmp_path)
+    _seed_history(sm, 50, 50)
+    _residue(sm)
+    sm.save(schemas.HealLedger(records=[
+        schemas.HealIterationRecord(
+            iteration=0, tier="mixed", pass_before=50, pass_after=50,
+            total=100, pass_rate_before=0.5, pass_rate_after=0.5,
+            delta=0.0, finished_at=_now()),
+        *_iter_rows(1, 50, 70),
+    ]))
+    d = heal_decision(sm)
+    assert d["iteration"] == 1   # iteration 0 (H0 baseline) not counted
+    assert d["decision"] == "continue"
 
 
 # ---------------------------------------------------------------------

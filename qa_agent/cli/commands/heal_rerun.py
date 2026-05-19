@@ -53,10 +53,14 @@ def run(args: argparse.Namespace) -> int:
     pass_after, total_after, rate_after = baseline_pass_rate(sm)
 
     ledger = sm.heal_ledger()
-    iteration = (
-        args.iteration if getattr(args, "iteration", None) is not None
-        else len(ledger.records) + 1
-    )
+    if getattr(args, "iteration", None) is not None:
+        iteration = args.iteration
+    else:
+        # Defensive: the skill always passes --iteration. Fall back to
+        # the next distinct loop iteration, not the row count (the skill
+        # writes 2 rows per iteration: systemic + per_test).
+        seen = {r.iteration for r in ledger.records if r.iteration >= 1}
+        iteration = (max(seen) + 1) if seen else 1
     rec = schemas.HealIterationRecord(
         iteration=iteration,
         run_id=ws.run_id,

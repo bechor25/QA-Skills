@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,6 +78,38 @@ def test_jest_json_parse(tmp_path: Path):
     out = '... before junk\n{"numPassedTests": 4, "numFailedTests": 1, "numPendingTests": 2}'
     passed, failed, skipped, _ = parse_jest_style_json(out, tmp_path)
     assert (passed, failed, skipped) == (4, 1, 2)
+
+
+def test_playwright_parses_report_file_ignoring_truncated_stdout(tmp_path: Path):
+    # Bug 2 regression: large playwright JSON is written to a file; the
+    # 256 KB stdout tail loses the opening '{'. Parser must read the
+    # file, not the truncated stdout.
+    from qa_agent.executors.playwright_runner import _parse_playwright
+
+    spec_file = "tests/qa-agent/ui/sample.spec.ts"
+    report = tmp_path / "pw.json"
+    report.write_text(json.dumps({
+        "stats": {"expected": 7, "unexpected": 2, "skipped": 1},
+        "suites": [{
+            "file": spec_file,
+            "specs": [{
+                "title": "QA-AGENT-BODY :: sc::sample::ui::01 :: case",
+                "file": spec_file,
+                "tests": [{"results": [{"status": "failed",
+                                        "duration": 12.0,
+                                        "error": {"message": "boom",
+                                                  "stack": "at x"}}]}],
+            }],
+        }],
+    }), encoding="utf-8")
+    truncated_stdout = "ple.ts:1:1 › ... [no opening brace] \"duration\": 9}"
+
+    passed, failed, skipped, records = _parse_playwright(
+        report, truncated_stdout, tmp_path
+    )
+    assert (passed, failed, skipped) == (7, 2, 1)
+    assert records and records[0].test_id == "sc::sample::ui::01"
+    assert records[0].status == "failed"
 
 
 def test_maven_summary_parse():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import uuid
 from pathlib import Path
 
 from ..runtime.process_manager import run_subprocess
@@ -30,10 +31,21 @@ class PlaywrightRunner(Executor):
         if not test_files:
             return ExecutionResult(framework=self.framework, category=effective_category)
         cmd = self._command(project_root, test_files)
-        env = {"PLAYWRIGHT_JSON_OUTPUT_NAME": "playwright-report.json"}
-        proc = run_subprocess(cmd, cwd=project_root, timeout=timeout, env=env)
-        report_file = project_root / "playwright-report.json"
-        passed, failed, skipped, records = _parse_playwright(report_file, proc.stdout_tail, project_root)
+        # Absolute json-output path: Playwright resolves a *relative*
+        # PLAYWRIGHT_JSON_OUTPUT_NAME against the config rootDir
+        # (tests/qa-agent/), not cwd. An absolute path is honoured
+        # verbatim, so we always know where the report lands and never
+        # depend on the 256 KB stdout tail (a 30-test report exceeds it,
+        # losing the opening brace). Mirrors the vitest --outputFile path.
+        report_file = _tmp_report_path(project_root)
+        env = {"PLAYWRIGHT_JSON_OUTPUT_NAME": str(report_file)}
+        try:
+            proc = run_subprocess(cmd, cwd=project_root, timeout=timeout, env=env)
+            passed, failed, skipped, records = _parse_playwright(
+                report_file, proc.stdout_tail, project_root
+            )
+        finally:
+            _safe_unlink(report_file)
         if proc.exit_code not in (0, None) and (passed + failed + skipped) == 0:
             failed = len(test_files)
         return ExecutionResult(
@@ -141,3 +153,16 @@ def _rel(path: str, project_root: Path) -> str:
         return str(Path(path).resolve().relative_to(project_root.resolve()))
     except (ValueError, OSError):
         return path
+
+
+def _tmp_report_path(project_root: Path) -> Path:
+    base = project_root / ".qa-agent" / "tmp"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / f"playwright-{uuid.uuid4().hex}.json"
+
+
+def _safe_unlink(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
