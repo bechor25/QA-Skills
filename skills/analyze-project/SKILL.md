@@ -1,18 +1,24 @@
 ---
 name: analyze-project
-description: Scan + risk-rate the project without generating or running tests. Triggers on "analyze project", "scan project", "what does my project contain", "נתח פרויקט", "סרוק פרויקט".
+description: Scans and risk-rates the current project without generating or running any tests. Use when the user says "analyze project", "scan project", "what does my project contain", "נתח פרויקט", "סרוק פרויקט".
 ---
 
 # analyze-project
 
-The user wants understanding, not execution. Hand off to **qa-master** with:
+The user wants understanding, not execution.
 
-> Run `${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run analyze --project "${PROJECT_ROOT}"`. Then summarize:
-> - project_summary (one paragraph)
-> - top 3 risk capabilities with their score + rationale
-> - frameworks detected
->
-> Do not run any tests, do not install anything.
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qa-skills-run" analyze --project "${PROJECT_ROOT}"
+```
+
+Then summarize:
+
+- `project_summary` (one paragraph)
+- top 3 risk capabilities with their score + rationale
+- frameworks detected
+
+Do not run any tests and do not install anything, because this skill is read-only by
+contract — users invoke it precisely when they are not ready to execute.
 
 ## What to surface back
 

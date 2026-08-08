@@ -94,7 +94,7 @@ QA-Skills/
 │   └── strategy.md
 ├── reports/
 │   └── enterprise.html.j2
-└── README.md / USAGE.md / AGENT.md / CHANGELOG.md
+└── README.md / USAGE.md / AGENTS.md / CHANGELOG.md
 ```
 
 ## 4. State model
@@ -203,7 +203,7 @@ The current orchestration model is the skill-driven pipeline below.
 ## 9. Near-term alignment work
 
 1. Remove or rewrite any stale references to `qa-master` in user-facing docs.
-2. Keep `README.md`, `USAGE.md`, and `AGENT.md` in sync with the skill-driven pipeline.
+2. Keep `README.md`, `USAGE.md`, and `AGENTS.md` in sync with the skill-driven pipeline.
 3. Preserve the sharded state contract when adding new phases, files, or agent roles.
 4. Update the roadmap whenever the CLI surface or state schema changes.
 

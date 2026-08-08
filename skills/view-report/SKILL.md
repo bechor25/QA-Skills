@@ -1,6 +1,6 @@
 ---
 name: view-report
-description: Open the latest QA HTML report. Triggers on "open qa report", "show qa report", "where is the report", "פתח דוח qa", "הצג דוח qa".
+description: Opens the latest QA HTML report in the browser and prints its path. Use when the user says "open qa report", "show qa report", "where is the report", "פתח דוח qa", "הצג דוח qa".
 ---
 
 # view-report

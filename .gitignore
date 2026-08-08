@@ -31,3 +31,9 @@ Thumbs.db
 
 # Local overrides
 *.local
+
+# Personal agent files (never commit — they are per-developer, not project config)
+CLAUDE.local.md
+**/CLAUDE.local.md
+.claude/settings.local.json
+.claude/*.local.json

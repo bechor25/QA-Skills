@@ -1,6 +1,6 @@
 ---
 name: rerun
-description: Re-execute a previously generated test suite. Triggers on "rerun", "rerun tests", "rerun failed", "rerun flaky", "rerun changed", "הרץ שוב", "הרץ נכשלים", "הרץ flaky".
+description: Re-executes a previously generated test suite by scope — changed, failed, flaky, or all. Use when the user says "rerun", "rerun tests", "rerun failed", "rerun flaky", "הרץ שוב", "הרץ נכשלים", "הרץ flaky".
 ---
 
 # rerun
